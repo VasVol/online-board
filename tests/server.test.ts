@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AddressInfo } from 'node:net';
@@ -19,6 +19,82 @@ async function until(fn: () => boolean, timeout = 6000) {
     await new Promise((r) => setTimeout(r, 20));
   }
 }
+test('HTTPS tunnel uses Secure owner cookies while direct local HTTP remains usable', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'pole-proxy-test-'));
+  try {
+    for (const trustLocalProxy of [false, true]) {
+      const app = createApp({ dbPath: join(dir, `${trustLocalProxy}.sqlite`), trustLocalProxy });
+      await new Promise<void>((r) => app.server.listen(0, '127.0.0.1', r));
+      const base = `http://127.0.0.1:${(app.server.address() as AddressInfo).port}`;
+      try {
+        for (const forwarded of [undefined, 'http', 'https']) {
+          for (const path of ['/api/session', '/api/session/restore']) {
+            const response = await fetch(base + path, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                ...(forwarded ? { 'X-Forwarded-Proto': forwarded } : {}),
+              },
+              body: JSON.stringify({ key: 'a'.repeat(43) }),
+            });
+            assert.equal(response.status, 200);
+            const cookie = response.headers.get('set-cookie')!;
+            assert.match(cookie, /HttpOnly/);
+            assert.match(cookie, /SameSite=Strict/);
+            assert.equal(/; Secure(?:;|$)/.test(cookie), trustLocalProxy && forwarded === 'https');
+          }
+        }
+        if (trustLocalProxy) {
+          const trusted = app.app.get('trust proxy fn') as (address: string) => boolean;
+          assert.equal(trusted('127.0.0.1'), true);
+          assert.equal(trusted('::1'), true);
+          assert.equal(trusted('192.168.0.108'), false);
+          assert.equal(trusted('198.51.100.1'), false);
+        }
+      } finally {
+        await app.close();
+      }
+    }
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('public build assets are compressed and cached; HTML and API remain fresh', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'pole-static-test-'));
+  const staticDir = join(dir, 'web');
+  await mkdir(join(staticDir, 'assets'), { recursive: true });
+  const body = '/* synthetic public bundle */\n'.repeat(500);
+  await writeFile(join(staticDir, 'assets', 'app-abcd1234.js'), body);
+  await writeFile(join(staticDir, 'index.html'), '<!doctype html><title>Pole</title>');
+  const app = createApp({ dbPath: join(dir, 'board.sqlite'), staticDir });
+  await new Promise<void>((r) => app.server.listen(0, '127.0.0.1', r));
+  const base = `http://127.0.0.1:${(app.server.address() as AddressInfo).port}`;
+  try {
+    const asset = await fetch(base + '/assets/app-abcd1234.js', {
+      headers: { 'Accept-Encoding': 'gzip' },
+    });
+    assert.equal(asset.headers.get('content-encoding'), 'gzip');
+    assert.match(asset.headers.get('vary') || '', /Accept-Encoding/i);
+    assert.match(asset.headers.get('cache-control') || '', /immutable/);
+    assert.equal(await asset.text(), body);
+    const plain = await fetch(base + '/assets/app-abcd1234.js', {
+      headers: { 'Accept-Encoding': 'identity' },
+    });
+    assert.equal(plain.headers.get('content-encoding'), null);
+    assert.equal(await plain.text(), body);
+    assert.equal((await fetch(base + '/assets/missing.js')).status, 404);
+    const page = await fetch(base + '/b/synthetic');
+    assert.doesNotMatch(page.headers.get('cache-control') || '', /immutable/);
+    const api = await fetch(base + '/api/health');
+    assert.equal(api.headers.get('cache-control'), 'no-store');
+    assert.equal(api.headers.get('content-encoding'), null);
+  } finally {
+    await app.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 async function setup() {
   const dir = await mkdtemp(join(tmpdir(), 'pole-test-'));
   const path = join(dir, 'board.sqlite');

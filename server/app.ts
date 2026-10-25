@@ -1,4 +1,5 @@
 import express from 'express';
+import compression from 'compression';
 import { createServer, type IncomingMessage } from 'node:http';
 import { resolve } from 'node:path';
 import { existsSync } from 'node:fs';
@@ -21,11 +22,19 @@ function publicBoard(board: StoredBoard) {
   const { owner: _, shareKey: __, ...rest } = board;
   return rest;
 }
-export function createApp(options: { dbPath: string; publicOrigin?: string; staticDir?: string }) {
+export function createApp(options: {
+  dbPath: string;
+  publicOrigin?: string;
+  staticDir?: string;
+  trustLocalProxy?: boolean;
+}) {
   const store = new Store(options.dbPath);
   const app = express();
   const server = createServer(app);
   app.disable('x-powered-by');
+  // A local HTTPS tunnel terminates TLS before forwarding HTTP to this process.
+  // Opt in explicitly; never trust forwarding headers from arbitrary LAN clients.
+  if (options.trustLocalProxy) app.set('trust proxy', 'loopback');
   function originAllowed(req: IncomingMessage) {
     const origin = req.headers.origin;
     return (
@@ -52,17 +61,17 @@ export function createApp(options: { dbPath: string; publicOrigin?: string; stat
     next();
   });
   app.use(express.json({ limit: '3mb' }));
-  const setCookie = (res: express.Response, key: string) =>
+  const setCookie = (req: express.Request, res: express.Response, key: string) =>
     res.cookie('pole_owner', key, {
       httpOnly: true,
       sameSite: 'strict',
-      secure: options.publicOrigin?.startsWith('https://') ?? false,
+      secure: req.secure || (options.publicOrigin?.startsWith('https://') ?? false),
       maxAge: 365 * 24 * 60 * 60 * 1000,
       path: '/',
     });
   app.get('/api/health', (_req, res) => res.json({ ok: true, schema: 1 }));
   app.post('/api/session', (req, res) => {
-    if (!tokenSchema.safeParse(cookie(req)).success) setCookie(res, secret());
+    if (!tokenSchema.safeParse(cookie(req)).success) setCookie(req, res, secret());
     res.json({ ok: true });
   });
   app.get('/api/session/export', (req, res) => {
@@ -73,7 +82,7 @@ export function createApp(options: { dbPath: string; publicOrigin?: string; stat
     res.json({ type: 'pole-owner-key', version: 1, key: cookie(req) });
   });
   app.post('/api/session/restore', (req, res) => {
-    setCookie(res, tokenSchema.parse(req.body.key));
+    setCookie(req, res, tokenSchema.parse(req.body.key));
     res.json({ ok: true });
   });
   app.use('/api/boards', (req, res, next) => {
@@ -227,6 +236,15 @@ export function createApp(options: { dbPath: string; publicOrigin?: string; stat
   app.use('/api', (_req, res) => res.status(404).json({ error: 'Маршрут не найден' }));
   const staticDir = options.staticDir || resolve('dist');
   if (existsSync(staticDir)) {
+    // Compress only public static files, after all private API routes.
+    app.use(compression());
+    app.use(
+      '/assets',
+      express.static(resolve(staticDir, 'assets'), { maxAge: '1y', immutable: true }),
+      (_req, res) => {
+        res.status(404).end();
+      },
+    );
     app.use(express.static(staticDir, { maxAge: 0 }));
     app.get('/{*path}', (_req, res) => res.sendFile(resolve(staticDir, 'index.html')));
   }
@@ -238,11 +256,9 @@ export function createApp(options: { dbPath: string; publicOrigin?: string; stat
       }
       const status = (err as { status?: number }).status;
       if (status === 413 || status === 400) {
-        res
-          .status(status)
-          .json({
-            error: status === 413 ? 'Файл слишком большой (максимум 2 МБ).' : 'Некорректный запрос',
-          });
+        res.status(status).json({
+          error: status === 413 ? 'Файл слишком большой (максимум 2 МБ).' : 'Некорректный запрос',
+        });
         return;
       }
       console.error('Request failed:', err instanceof Error ? err.message : 'unknown');

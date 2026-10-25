@@ -6,6 +6,7 @@ const host = process.env.HOST || '0.0.0.0';
 const instance = createApp({
   dbPath: resolve(process.env.DATA_DIR || 'data', 'board.sqlite'),
   publicOrigin: process.env.PUBLIC_ORIGIN,
+  trustLocalProxy: process.env.TRUST_LOCAL_PROXY === '1',
 });
 instance.server.listen(port, host, () =>
   console.log(`Поле: http://localhost:${port} (listen ${host})`),

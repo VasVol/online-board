@@ -1,0 +1,16 @@
+[Unit]
+Description=Temporary public HTTPS link for Pole
+Wants=pole.service
+After=pole.service network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 %h/.local/share/online-board/run-tunnel.py
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=15
+UMask=0077
+NoNewPrivileges=true
+Environment=NO_PROXY=localhost,127.0.0.1
+
+# Started on demand. A new process gets a new public hostname.
