@@ -1,0 +1,6 @@
+# Replace the domain. Point DNS to the server; allow incoming TCP 80 and 443.
+board.example.org {
+    encode zstd gzip
+    reverse_proxy 127.0.0.1:3001
+    # Do not enable raw access logging: WS query contains the board key.
+}

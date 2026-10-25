@@ -1,0 +1,20 @@
+node_modules/
+dist/
+dist-server/
+data/
+backups/
+.env
+.env.*
+!.env.example
+playwright-report/
+test-results/
+*.log
+.DS_Store
+
+public/excalidraw-assets/
+
+# Local access exports and deployment credentials must never be published.
+pole-owner-key*.json
+*.pem
+*.key
+.deploy/

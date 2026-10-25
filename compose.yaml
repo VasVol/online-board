@@ -1,0 +1,14 @@
+services:
+  board:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:3001:3001"
+    environment:
+      PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:-http://localhost:3001}
+    volumes:
+      - board-data:/app/data
+    init: true
+    stop_grace_period: 20s
+volumes:
+  board-data:

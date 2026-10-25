@@ -1,0 +1,17 @@
+{
+  "date": "2026-10-24T16:10:26.396Z",
+  "node": "v20.19.2",
+  "cpu": "12th Gen Intel(R) Core(TM) i7-12650H",
+  "boards": 500,
+  "pages": 10000,
+  "activeDocumentShapes": 10000,
+  "catalogSeedMs": 418.55,
+  "catalogMedianMs": 0.38,
+  "pageListMedianMs": 0.11,
+  "populateMs": 16.9,
+  "encodeMs": 30.41,
+  "documentBytes": 1179120,
+  "persistMs": 2.66,
+  "loadMs": 56.6,
+  "notes": "Synthetic metadata / CRDT / SQLite benchmark. Catalog seeding uses one transaction. Does not measure browser rendering, internet latency, or concurrent classroom capacity."
+}
