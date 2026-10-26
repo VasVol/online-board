@@ -1,8 +1,11 @@
 import copy
 import importlib.util
 import json
+import os
 from pathlib import Path
+import sqlite3
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -111,6 +114,40 @@ class ActivationTest(unittest.TestCase):
         self.assertEqual(self.d.state['previous'], str(self.old))
         self.assertEqual(self.d.state['backup'], 'verified-backup.sqlite')
         self.assertFalse((self.root / 'pending.json').exists())
+
+
+class DatabaseTest(unittest.TestCase):
+    def test_backup_closed_and_live_wal_database_preserves_latest_data(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / 'board.sqlite'
+            writer = sqlite3.connect(source)
+            writer.execute('PRAGMA journal_mode=WAL')
+            writer.execute('CREATE TABLE example(value)')
+            writer.execute('INSERT INTO example VALUES (1)')
+            writer.commit(); writer.close()
+            self.assertFalse(Path(str(source) + '-wal').exists())
+            owner = SimpleNamespace(pw_uid=os.getuid(), pw_gid=os.getgid())
+            with patch.object(m, 'DATA', source), patch.object(m, 'BACKUPS', root), \
+                    patch.object(m, 'STATE', root), patch.object(m.pwd, 'getpwnam', return_value=owner):
+                d = m.Deployer(CONFIG)
+                schema = m.fingerprint(source)
+                closed_backup = Path(d.backup(SHA))
+                writer = sqlite3.connect(source)
+                try:
+                    writer.execute('INSERT INTO example VALUES (2)'); writer.commit()
+                    live_backup = Path(d.backup(SHA))
+                    self.assertEqual(m.fingerprint(source), schema)
+                finally:
+                    writer.close()
+                for backup, expected in [(closed_backup, [(1,)]), (live_backup, [(1,), (2,)])]:
+                    db = sqlite3.connect(backup)
+                    try:
+                        self.assertEqual(db.execute('PRAGMA integrity_check').fetchone(), ('ok',))
+                        self.assertEqual(db.execute('SELECT value FROM example ORDER BY value').fetchall(), expected)
+                        self.assertEqual(backup.stat().st_mode & 0o777, 0o600)
+                    finally:
+                        db.close()
 
 
 class PublishTest(unittest.TestCase):

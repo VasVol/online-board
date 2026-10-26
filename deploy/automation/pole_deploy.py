@@ -90,7 +90,7 @@ def builder(args, cwd):
 
 
 def fingerprint(path):
-    with sqlite3.connect(f"file:{path}?mode=ro", uri=True) as db:
+    with contextlib.closing(sqlite3.connect(f"file:{path}?mode=ro", uri=True)) as db:
         version = db.execute("PRAGMA user_version").fetchone()[0]
         rows = db.execute("SELECT type,name,tbl_name,sql FROM sqlite_master "
                           "WHERE name NOT LIKE 'sqlite_%' ORDER BY type,name").fetchall()
@@ -170,7 +170,8 @@ class Deployer:
             pass
         os.chmod(target, 0o600)
         try:
-            with sqlite3.connect(f"file:{DATA}?mode=ro", uri=True) as source, sqlite3.connect(target) as dest:
+            with contextlib.closing(sqlite3.connect(f"file:{DATA}?mode=ro", uri=True)) as source, \
+                    contextlib.closing(sqlite3.connect(target)) as dest:
                 source.backup(dest)
                 if dest.execute("PRAGMA integrity_check").fetchone() != ("ok",):
                     raise RuntimeError("Backup integrity check failed")

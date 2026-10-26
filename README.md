@@ -145,11 +145,12 @@ npm run check
 `check` запускает TypeScript, unit/integration, Chromium E2E, проверку пера на отдельной production-сборке и рабочую production build. На чистом Linux CI зависимости Chromium ставятся `npx playwright install --with-deps chromium --only-shell`.
 
 - `npm test`: геометрия, CRDT-конфликты, права, пагинация, два WebSocket-клиента, reconnect, запись на диск, restart и освобождение комнат.
+- `npm run test:deploy`: обязательность CI, блокировка обновления во время занятия, публикация готового релиза, backup и откат кода; Python 3, только стандартная библиотека.
 - `npm run test:e2e`: реальные жесты, L/C, стили, выделение/копирование, undo/redo, страницы, перезагрузка, два независимых браузера и offline/reconnect.
 - `npm run test:e2e:production`: постоянная толщина пера и вставка из библиотеки картинок на настоящей production-сборке; данные и сборка находятся во временном каталоге.
 - `npm run bench`: синтетический каталог 500 досок / 10 000 страниц и загрузка CRDT-документа 10 000 объектов. Последний замер — `docs/BENCHMARK.json`; это не benchmark рендеринга и не обещание такого же времени через интернет.
 - `.githooks/pre-commit` выполняет полный `check`. Он подключается после `npm ci`; проверьте `git config --get core.hooksPath`. Если у вас уже свой hook, установщик его не перезаписывает — добавьте `npm run check` туда.
-- GitHub Actions запускает те же проверки на push/PR. Локальный hook можно обойти `--no-verify`, поэтому CI тоже необходим. Защита ветки на GitHub должна настраиваться отдельно.
+- GitHub Actions запускает те же проверки на push/PR; обход локального hook запрещён рабочим порядком. Независимо от hook VPS требует успешный CI для точного SHA. Защита ветки на GitHub настраивается отдельно.
 
 Результаты первоначальной проверки и состояние рабочего запуска — [VERIFICATION.md](docs/VERIFICATION.md).
 
