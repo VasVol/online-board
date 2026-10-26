@@ -66,7 +66,7 @@ BOARD_URL=https://board.vasilyvolovich.com \
 ### Обязательные проверки
 
 - `.githooks/pre-commit` требует отсутствие незафиксированных в индексе изменений и запускает полный `npm run check`. Тестируется то же дерево, которое попадёт в коммит; обход hook запрещён рабочим порядком.
-- `.github/workflows/ci.yml`: push/PR → Node 22 → `npm ci` → Chromium → **Run full check** в job **test**. Включены 17 Node unit/integration, 8 тестов механизма обновления на Python, 10 dev E2E и 3 production E2E, TypeScript и build (числа актуальны для настройки, меняются при добавлении тестов).
+- `.github/workflows/ci.yml`: push/PR → Node 22 → `npm ci` → Chromium → **Run full check** в job **test**. Включены 17 Node unit/integration, 10 тестов механизма обновления на Python, 10 dev E2E и 3 production E2E, TypeScript и build (числа актуальны для настройки, меняются при добавлении тестов).
 - VPS не полагается на локальный hook. Он проверяет публичный API GitHub: текущий SHA `main`, repository ID `1432285563`, workflow ID `396402665`, путь `.github/workflows/ci.yml`, event `push`, успешное завершение последнего run/attempt, успешные job `test` и step `Run full check` именно для этого SHA. Пропущенные/упавшие/отменённые тесты, PR и чужие ветки не допускаются.
 - Результат ожидания CI не означает обновление сайта. Проверить поле `revision` и статус updater обязательно. Правила защищённой ветки в GitHub этим установщиком не меняются; обязательный барьер перед VPS реализован на самом сервере.
 

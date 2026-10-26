@@ -113,5 +113,40 @@ class ActivationTest(unittest.TestCase):
         self.assertFalse((self.root / 'pending.json').exists())
 
 
+class PublishTest(unittest.TestCase):
+    def test_separate_mounts_publish_complete_tree_and_preserve_module_symlinks(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            stage = root / 'cache' / SHA
+            stage.mkdir(parents=True)
+            (stage / 'file').write_text('verified build')
+            (stage / 'link').symlink_to('file')
+            release = root / 'releases' / SHA
+            release.parent.mkdir()
+            replace = Path.replace
+            def same_mount_only(source, target):
+                self.assertEqual(source.parent, target.parent, 'cross-mount rename is forbidden')
+                return replace(source, target)
+            with patch.object(Path, 'replace', same_mount_only):
+                m.publish_release(stage, release)
+            self.assertEqual((release / 'file').read_text(), 'verified build')
+            self.assertTrue((release / 'link').is_symlink())
+            self.assertEqual((release / 'link').read_text(), 'verified build')
+
+    def test_failed_copy_never_exposes_partial_release(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            stage = root / 'source'; stage.mkdir()
+            release = root / SHA
+            def failed_copy(source, destination, **kwargs):
+                destination.mkdir()
+                (destination / 'partial').write_text('incomplete')
+                raise OSError('disk full')
+            with patch.object(m.shutil, 'copytree', failed_copy), self.assertRaises(OSError):
+                m.publish_release(stage, release)
+            self.assertFalse(release.exists())
+            self.assertFalse((root / ('.incoming-' + SHA)).exists())
+
+
 if __name__ == '__main__':
     unittest.main()

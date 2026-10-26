@@ -97,6 +97,20 @@ def fingerprint(path):
     return version, hashlib.sha256(json.dumps(rows).encode()).hexdigest()
 
 
+def publish_release(stage, release):
+    # ProtectSystem/ReadWritePaths create separate bind mounts even when both
+    # directories live on one physical disk. Cross-mount rename raises EXDEV.
+    incoming = release.parent / (".incoming-" + release.name)
+    if incoming.exists():
+        shutil.rmtree(incoming)
+    try:
+        shutil.copytree(stage, incoming, symlinks=True)
+        incoming.replace(release)  # Atomic, on the same mount as the final release.
+    finally:
+        if incoming.exists():
+            shutil.rmtree(incoming)
+
+
 def control(method, path):
     class UnixHTTP(http.client.HTTPConnection):
         def connect(self):
@@ -229,7 +243,7 @@ class Deployer:
             # Only root may change a ready release. The builder cannot edit active code.
             command(["chown", "-R", "--no-dereference", "root:root", stage])
             command(["chmod", "-R", "a+rX,go-w", stage])
-            stage.replace(release)
+            publish_release(stage, release)
             return release
         finally:
             if stage.exists():
