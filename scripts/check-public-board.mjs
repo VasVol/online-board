@@ -13,6 +13,11 @@ const base = (
 ).trim();
 if (!/^https:\/\/[a-z0-9.-]+(?::\d+)?$/.test(base))
   throw new Error('BOARD_URL must be an HTTPS origin');
+const restartLocal = process.argv.includes('--restart-local');
+const restartSsh = process.argv.find((arg) => arg.startsWith('--restart-ssh='))?.slice(14);
+if (restartSsh !== undefined && !/^[A-Za-z0-9][A-Za-z0-9_.-]*$/.test(restartSsh))
+  throw new Error('Expected --restart-ssh=SSH_ALIAS');
+if (restartLocal && restartSsh) throw new Error('Choose only one restart target');
 const output = 'test-results/public-smoke';
 await mkdir(output, { recursive: true, mode: 0o700 });
 const browser = await chromium.launch({
@@ -77,8 +82,32 @@ async function colors(page) {
     return red > 100 && blue > 100;
   });
 }
+async function laser(sender, receiver) {
+  await sender.keyboard.press('k');
+  const box = await sender.getByTestId('drawing-surface').boundingBox();
+  const trails = receiver.locator('.SVGLayer path[fill="red"][d]:not([d=""])');
+  await sender.mouse.move(box.x + 450, box.y + 550);
+  await sender.mouse.down();
+  try {
+    await sender.mouse.move(box.x + 650, box.y + 600, { steps: 24 });
+    await expect(trails).toHaveCount(1);
+    await expect(trails).toBeVisible();
+    const bounds = await trails.boundingBox();
+    expect(bounds.width).toBeGreaterThan(1);
+    expect(bounds.height).toBeGreaterThan(1);
+    await receiver.screenshot({ path: `${output}/remote-laser.png` });
+  } finally {
+    await sender.mouse.up();
+  }
+  await expect(trails).toHaveCount(0);
+  await sender.getByRole('button', { name: 'Draw — карандаш (P)', exact: true }).click();
+}
 try {
   const a = await owner.newPage();
+  a.on('response', (response) => {
+    if (response.url().includes('/files/') && response.request().method() === 'PUT')
+      console.log('Image upload HTTP status:', response.status());
+  });
   const b = await guest.newPage();
   const elementsA = observe(a),
     elementsB = observe(b);
@@ -107,6 +136,9 @@ try {
   console.log(
     'PASS: two independent browsers draw through public HTTPS/WSS; Secure cookie; actual canvas pixels',
   );
+  await laser(a, b);
+  await laser(b, a);
+  console.log('PASS: remote laser trails appear in both directions and fade after release');
   await guest.setOffline(true);
   await expect(b.getByRole('status')).toContainText('Нет связи');
   await draw(b, 600, 260, '#1971c2');
@@ -116,20 +148,61 @@ try {
   await expect.poll(() => elementsA().length, { timeout: 20000 }).toBe(4);
   await expect.poll(() => elementsB().length, { timeout: 20000 }).toBe(4);
   await ready(a);
+  await a.getByRole('button', { name: 'Библиотека картинок', exact: true }).click();
+  const uploadedImage = a.waitForResponse(
+    (response) =>
+      response.url().includes('/files/') &&
+      response.request().method() === 'PUT' &&
+      response.status() === 200,
+    { timeout: 90000 },
+  );
+  await a.getByRole('button', { name: 'Добавить: Координатная плоскость' }).click();
+  await uploadedImage;
+  await ready(a);
+  await expect.poll(() => elementsA().length, { timeout: 20000 }).toBe(5);
+  await expect.poll(() => elementsB().length, { timeout: 20000 }).toBe(5);
+  const grid = elementsA().find((element) => element.type === 'image');
+  expect(grid?.fileId).toBeTruthy();
+  const expectedGrid =
+    'data:image/png;base64,' +
+    (await readFile('src/assets/coordinate-grid.png')).toString('base64');
   // Close both active scenes before restarting: a cached client must not be able
   // to repopulate an empty server and hide a persistence regression.
   await Promise.all([a.close(), b.close()]);
-  if (process.argv.includes('--restart-local')) {
+  if (restartLocal) {
     execFileSync('systemctl', ['--user', 'restart', 'pole.service']);
   }
+  if (restartSsh) {
+    execFileSync('ssh', [
+      ...(process.env.BOARD_SSH_CONFIG ? ['-F', process.env.BOARD_SSH_CONFIG] : []),
+      '-o',
+      'BatchMode=yes',
+      restartSsh,
+      'sudo',
+      '-n',
+      'systemctl',
+      'restart',
+      'pole.service',
+    ]);
+  }
+  console.log(
+    'Opening a fresh guest after closing both clients' +
+      (restartLocal || restartSsh ? ' and restarting the backend' : ''),
+  );
   const fresh = await browser.newContext(contextOptions);
   try {
     const c = await fresh.newPage();
     const elementsC = observe(c);
+    const imageResponse = c.waitForResponse(
+      (response) => response.url().includes(`/files/${grid.fileId}`) && response.status() === 200,
+      { timeout: 90000 },
+    );
     await c.goto(link, { timeout: 60000 });
     await ready(c);
-    await expect.poll(() => elementsC().length, { timeout: 20000 }).toBe(4);
-    await expect.poll(() => colors(c)).toBe(true);
+    await expect.poll(() => elementsC().length, { timeout: 20000 }).toBe(5);
+    expect((await (await imageResponse).json()).dataURL).toBe(expectedGrid);
+    // The opaque grid can cover the strokes; pixel colors were checked before insertion.
+    expect(elementsC().filter((element) => element.type === 'freedraw')).toHaveLength(4);
     await c.screenshot({ path: `${output}/guest.png` });
     const denied = await fresh.request.get(`${base}/api/boards/${boardId}`);
     expect(denied.status()).toBe(404);
@@ -138,7 +211,7 @@ try {
   }
   expect(errors).toEqual([]);
   console.log(
-    'PASS: offline/reconnect and fresh guest without cache; persistence; unrelated access denied',
+    'PASS: offline/reconnect and fresh guest without cache; persisted strokes and exact image; unrelated access denied',
   );
   await writeFile(
     `${output}/result.json`,
@@ -146,7 +219,8 @@ try {
       {
         ok: true,
         origin: base,
-        restart: process.argv.includes('--restart-local'),
+        restart: restartLocal || !!restartSsh,
+        restartTarget: restartSsh || (restartLocal ? 'local' : null),
         checkedAt: new Date().toISOString(),
       },
       null,

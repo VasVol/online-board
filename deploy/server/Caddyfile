@@ -1,0 +1,17 @@
+{
+    log {
+        format filter {
+            wrap json
+            fields {
+                request>uri delete
+                request>headers delete
+            }
+        }
+    }
+}
+
+board.vasilyvolovich.com {
+    encode zstd gzip
+    reverse_proxy 127.0.0.1:3001
+    # No access log: WebSocket query strings contain private board keys.
+}

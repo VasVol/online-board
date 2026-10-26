@@ -1,6 +1,8 @@
 # Проверка хостинга с ноутбука
 
-26 октября 2026. Приложение работает на ноутбуке как `pole.service`, данные остаются в `data/board.sqlite`. В интернет публикуется production на порту 3001 через временный HTTPS-туннель Pinggy. Dev-сервер Vite не публикуется. Домен `board.vasilyvolovich.com` и DNS не менялись.
+**Архивная инструкция. С 27 октября 2026 доска работает на VPS:** https://board.vasilyvolovich.com. `online-board-public` переключён в режим `server`, старые туннели остановлены. Не запускайте ноутбучный Cloudflare connector: домен теперь направлен прямо на VPS и обслуживается Caddy. Для локальной копии используйте `online-board --local`; она не синхронизируется с VPS. Актуальные команды — в [DEPLOYMENT.md](DEPLOYMENT.md).
+
+26 октября 2026. Приложение работает на ноутбуке как `pole.service`, данные остаются в `data/board.sqlite`. Проверенный способ временного доступа — production на порту 3001 через HTTPS-туннель Pinggy. Dev-сервер Vite не публикуется. Вечером создан DNS для `board.vasilyvolovich.com`, но публичная работа через Cloudflare ещё не подтверждена из-за ошибок туннеля; установленная команда `online-board-public` пока управляет Pinggy. Подробности и следующий шаг — [DEPLOYMENT.md](DEPLOYMENT.md).
 
 ## Открыть и выключить доступ
 

@@ -1,0 +1,27 @@
+[Unit]
+Description=HTTPS and WebSocket tunnel for board.vasilyvolovich.com
+Wants=network-online.target pole.service
+After=network-online.target pole.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=pole-tunnel
+Group=pole-tunnel
+LoadCredential=tunnel-token:/etc/pole/cloudflare-token
+ExecStart=/usr/local/bin/cloudflared tunnel --no-autoupdate --protocol http2 --edge-ip-version 4 --grace-period 10s --loglevel warn --metrics 127.0.0.1:20246 run --token-file %d/tunnel-token
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=20
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+
+[Install]
+WantedBy=multi-user.target

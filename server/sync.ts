@@ -12,6 +12,7 @@ import * as encoding from 'lib0/encoding';
 import * as decoding from 'lib0/decoding';
 import type { Store } from './database.js';
 import type { IncomingMessage } from 'node:http';
+import type { DeploymentGate } from './deployment.js';
 
 const MAX_PAYLOAD = 8 * 1024 * 1024;
 interface Peer {
@@ -38,8 +39,15 @@ export class SyncServer {
     private store: Store,
     authorize: (req: IncomingMessage, boardId: string, key?: string) => boolean,
     originAllowed: (req: IncomingMessage) => boolean,
+    private deployment?: DeploymentGate,
   ) {
     server.on('upgrade', (req, socket, head) => {
+      if (deployment?.paused) {
+        socket.end(
+          'HTTP/1.1 503 Service Unavailable\r\nRetry-After: 5\r\nConnection: close\r\n\r\n',
+        );
+        return;
+      }
       const url = new URL(req.url || '/', 'http://localhost');
       const match = url.pathname.match(/^\/sync\/([\w-]+)\/([\w-]+)$/);
       const page = match && store.page(match[2]);
@@ -139,6 +147,7 @@ export class SyncServer {
     }
     const peer: Peer = { ids: new Set(), alive: true, bytes: 0, window: Date.now() };
     room.peers.set(ws, peer);
+    this.deployment?.connected();
     ws.on('error', () => ws.terminate());
     ws.on('pong', () => {
       peer.alive = true;
@@ -203,6 +212,7 @@ export class SyncServer {
     });
     ws.on('close', () => {
       room.peers.delete(ws);
+      this.deployment?.disconnected();
       removeAwarenessStates(room.awareness, [...peer.ids], null);
       if (room.peers.size === 0) {
         room.timer = setTimeout(() => this.evict(pageId), 2000);

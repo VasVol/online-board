@@ -8,7 +8,7 @@ import {
   convertToExcalidrawElements,
   serializeAsJSON,
   exportToBlob,
-  viewportCoordsToSceneCoords,
+  DEFAULT_LASER_COLOR,
 } from '@excalidraw/excalidraw';
 import type {
   ExcalidrawImperativeAPI,
@@ -16,7 +16,6 @@ import type {
   BinaryFiles,
   Collaborator,
   SocketId,
-  BinaryFileData,
 } from '@excalidraw/excalidraw/types';
 import type { ExcalidrawElement } from '@excalidraw/excalidraw/element/types';
 import '@excalidraw/excalidraw/index.css';
@@ -30,10 +29,13 @@ import {
   Maximize,
   Grid2X2,
   ImagePlus,
+  Images,
 } from 'lucide-react';
 import { PageSession, type ConnectionState } from './session';
 import { SceneBinding, readElements } from './scene';
 import { FileBridge } from './files';
+import { insertImage } from './insert-image';
+import { ImageLibrary } from './ImageLibrary';
 import { installHoldTools, type Preview } from './hold-tools';
 import { circleBounds } from './geometry';
 import { download } from '../api';
@@ -60,6 +62,7 @@ export default function Canvas(props: Props) {
   const [color, setColor] = useState('#28354a');
   const [width, setWidth] = useState(2);
   const [grid, setGrid] = useState(false);
+  const [library, setLibrary] = useState(false);
   const root = useRef<HTMLDivElement>(null);
   const imageInput = useRef<HTMLInputElement>(null);
   const binding = useRef<SceneBinding | null>(null),
@@ -142,8 +145,25 @@ export default function Canvas(props: Props) {
         collaborators.set(String(id) as SocketId, {
           username: name,
           ...(pointer && Number.isFinite(pointer.x) && Number.isFinite(pointer.y)
-            ? { pointer: { x: pointer.x, y: pointer.y, tool: 'pointer' as const } }
-            : {}),
+            ? {
+                pointer: {
+                  x: pointer.x,
+                  y: pointer.y,
+                  tool: pointer.tool === 'laser' ? ('laser' as const) : ('pointer' as const),
+                  laserColor: DEFAULT_LASER_COLOR,
+                },
+              }
+            : {
+                // The SDK captures the first pointer when choosing the trail color.
+                // Hide the cursor until a real position arrives, but seed its color.
+                pointer: {
+                  x: 0,
+                  y: 0,
+                  tool: 'pointer' as const,
+                  renderCursor: false,
+                  laserColor: DEFAULT_LASER_COLOR,
+                },
+              }),
           button: value.button === 'down' ? 'down' : 'up',
           color: { background: '#d8eee7', stroke: '#16836a' },
         });
@@ -275,68 +295,22 @@ export default function Canvas(props: Props) {
       captureUpdate: CaptureUpdateAction.IMMEDIATELY,
     });
   }
-  async function insertImage(file?: File) {
-    if (!file || !api) return;
+  async function addImage(file: File, signal?: AbortSignal) {
+    if (!api || !files.current) throw new Error('Подождите, пока откроется страница.');
+    const bridge = files.current;
+    await insertImage(file, api, (binary) => bridge.accept({ [binary.id]: binary }), signal);
+  }
+  async function uploadImage(file?: File) {
+    if (!file) return;
     try {
-      if (
-        !['image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(file.type) ||
-        file.size > 2 * 1024 * 1024
-      )
-        throw new Error('Выберите PNG, JPEG, WebP или GIF размером до 2 МБ.');
-      const dataURL = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(String(reader.result));
-        reader.onerror = () => reject(reader.error);
-        reader.readAsDataURL(file);
-      });
-      const image = new Image();
-      image.src = dataURL;
-      await image.decode();
-      const id = [...crypto.getRandomValues(new Uint8Array(16))]
-        .map((n) => n.toString(16).padStart(2, '0'))
-        .join('') as BinaryFileData['id'];
-      const binary: BinaryFileData = {
-        id,
-        dataURL: dataURL as BinaryFileData['dataURL'],
-        mimeType: file.type as BinaryFileData['mimeType'],
-        created: Date.now(),
-      };
-      const state = api.getAppState();
-      const point = viewportCoordsToSceneCoords(
-        {
-          clientX: state.offsetLeft + state.width / 2,
-          clientY: state.offsetTop + state.height / 2,
-        },
-        state,
-      );
-      const scale = Math.min(1, 600 / image.naturalWidth, 500 / image.naturalHeight);
-      const width = image.naturalWidth * scale,
-        height = image.naturalHeight * scale;
-      api.addFiles([binary]);
-      files.current?.accept({ [id]: binary });
-      const elements = convertToExcalidrawElements([
-        {
-          type: 'image',
-          fileId: id,
-          x: point.x - width / 2,
-          y: point.y - height / 2,
-          width,
-          height,
-          status: 'saved',
-          scale: [1, 1],
-        },
-      ]);
-      api.updateScene({
-        elements: [...api.getSceneElementsIncludingDeleted(), ...elements],
-        captureUpdate: CaptureUpdateAction.IMMEDIATELY,
-      });
-      api.setActiveTool({ type: 'selection' });
+      await addImage(file);
     } catch (error) {
       handlers.current.onError(
         error instanceof Error ? error.message : 'Не удалось загрузить изображение',
       );
+    } finally {
+      if (imageInput.current) imageInput.current.value = '';
     }
-    if (imageInput.current) imageInput.current.value = '';
   }
   async function savePng() {
     if (!api) return;
@@ -434,8 +408,18 @@ export default function Canvas(props: Props) {
           ref={imageInput}
           hidden
           accept="image/png,image/jpeg,image/webp,image/gif"
-          onChange={(e) => void insertImage(e.target.files?.[0])}
+          onChange={(e) => void uploadImage(e.target.files?.[0])}
         />
+        <button
+          className="image-library-toggle"
+          aria-label="Библиотека картинок"
+          title="Библиотека картинок"
+          disabled={!api || !session || connection === 'denied'}
+          onClick={() => setLibrary(true)}
+        >
+          <Images size={18} />
+          Картинки
+        </button>
         <button
           aria-label="Сетка"
           title="Сетка"
@@ -456,6 +440,7 @@ export default function Canvas(props: Props) {
           <kbd>L</kbd> прямая <kbd>C</kbd> окружность <span>· удерживайте</span>
         </div>
       </aside>
+      {library && <ImageLibrary onInsert={addImage} onClose={() => setLibrary(false)} />}
       <div className="canvas" ref={root} data-testid="drawing-surface">
         {session ? (
           <Excalidraw
@@ -483,8 +468,9 @@ export default function Canvas(props: Props) {
             gridModeEnabled={grid}
             validateEmbeddable={false}
             onPointerUpdate={({ pointer, button }) => {
-              session.provider.awareness.setLocalStateField('pointer', pointer);
-              session.provider.awareness.setLocalStateField('button', button);
+              const awareness = session.provider.awareness;
+              // Publish the tool, position and button in one ephemeral update.
+              awareness.setLocalState({ ...awareness.getLocalState(), pointer, button });
             }}
             UIOptions={{
               canvasActions: { saveToActiveFile: false, export: false, loadScene: false },

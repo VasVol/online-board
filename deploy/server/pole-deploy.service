@@ -1,0 +1,20 @@
+[Unit]
+Description=Deploy tested main from GitHub when Pole is idle
+After=network-online.target pole.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /usr/local/lib/pole-deploy/pole_deploy.py
+TimeoutStartSec=20min
+UMask=0022
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+ProtectHome=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/opt/pole /var/lib/pole-deploy /var/cache/pole-build /var/backups/pole
+# Connecting to a Unix socket needs no writable filesystem mount. Do not bind
+# /run/pole: systemd recreates it when pole restarts during this same deployment.
+# npm/build run as pole-build, never as root; production runs as pole.

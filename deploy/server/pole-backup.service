@@ -1,0 +1,17 @@
+[Unit]
+Description=Consistent verified backup of Pole SQLite (including images)
+
+[Service]
+Type=oneshot
+User=pole
+Group=pole
+WorkingDirectory=/opt/pole/current
+Environment=DATA_DIR=/var/lib/pole
+Environment=BACKUP_DIR=/var/backups/pole
+ExecStart=/usr/bin/node --import tsx scripts/backup.ts
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/pole /var/backups/pole

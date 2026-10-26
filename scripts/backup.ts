@@ -5,7 +5,8 @@ import { existsSync } from 'node:fs';
 const source = resolve(process.env.DATA_DIR || 'data', 'board.sqlite');
 if (!existsSync(source)) throw new Error(`Database not found: ${source}`);
 const target = resolve(
-  process.argv[2] || `backups/pole-${new Date().toISOString().replace(/[:.]/g, '-')}.sqlite`,
+  process.argv[2] ||
+    `${process.env.BACKUP_DIR || 'backups'}/pole-${new Date().toISOString().replace(/[:.]/g, '-')}.sqlite`,
 );
 if (existsSync(target)) throw new Error('Refusing to overwrite an existing backup');
 await mkdir(dirname(target), { recursive: true, mode: 0o700 });

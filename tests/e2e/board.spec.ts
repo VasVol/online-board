@@ -1,5 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
-import type { ExcalidrawImperativeAPI } from '@excalidraw/excalidraw/types';
+import { readFileSync } from 'node:fs';
+import type { AppState, ExcalidrawImperativeAPI } from '@excalidraw/excalidraw/types';
 import type { PageSession } from '../../src/canvas/session';
 declare global {
   interface Window {
@@ -348,6 +349,111 @@ test('select, duplicate, move, rotate, erase and Hand preserve expected objects'
   await expect.poll(async () => (await elements(page)).length).toBe(2);
 });
 
+test('laser pointer is visible to another browser, fades and works after reconnect and reload', async ({
+  page,
+  browser,
+}) => {
+  await create(page, 'Лазерная указка');
+  await page.getByRole('button', { name: 'Поделиться', exact: true }).click();
+  const url = await page.getByLabel('Ссылка для редактирования').inputValue();
+  await page.getByRole('button', { name: 'Закрыть', exact: true }).click();
+  const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
+  const guest = await context.newPage();
+
+  async function redPixels(receiver: Page, point: { x: number; y: number }) {
+    const clip = await receiver.evaluate(({ x, y }) => {
+      const state = window.__board.api.getAppState();
+      return {
+        x: Math.round((x + state.scrollX) * state.zoom.value + state.offsetLeft) - 32,
+        y: Math.round((y + state.scrollY) * state.zoom.value + state.offsetTop) - 32,
+        width: 64,
+        height: 64,
+      };
+    }, point);
+    // Rasterize an actual browser screenshot: laser trails are in the SVG overlay,
+    // so checking only the scene or the static Canvas would miss this regression.
+    const screenshot = await receiver.screenshot({ clip });
+    return receiver.evaluate(async (base64) => {
+      const image = new Image();
+      image.src = 'data:image/png;base64,' + base64;
+      await image.decode();
+      const canvas = document.createElement('canvas');
+      canvas.width = image.width;
+      canvas.height = image.height;
+      const ctx = canvas.getContext('2d')!;
+      ctx.drawImage(image, 0, 0);
+      const pixels = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+      let red = 0;
+      for (let i = 0; i < pixels.length; i += 4)
+        if (pixels[i] > 180 && pixels[i + 1] < 100 && pixels[i + 2] < 100) red++;
+      return red;
+    }, screenshot.toString('base64'));
+  }
+
+  async function pointLaser(sender: Page, receiver: Page) {
+    if (await sender.evaluate(() => window.__board.api.getAppState().activeTool.type !== 'laser'))
+      await sender.keyboard.press('k');
+    await expect
+      .poll(() => sender.evaluate(() => window.__board.api.getAppState().activeTool.type))
+      .toBe('laser');
+    const box = (await sender.getByTestId('drawing-surface').boundingBox())!;
+    await sender.mouse.move(box.x + 480, box.y + 400);
+    await sender.mouse.down();
+    try {
+      await sender.mouse.move(box.x + 650, box.y + 440, { steps: 20 });
+      const pointer = await sender.evaluate(
+        () =>
+          window.__board.session.provider.awareness.getLocalState()!.pointer as {
+            x: number;
+            y: number;
+          },
+      );
+      await expect.poll(() => redPixels(receiver, pointer), { timeout: 5000 }).toBeGreaterThan(3);
+      await receiver.screenshot({ path: 'test-results/remote-laser.png' });
+      return pointer;
+    } finally {
+      await sender.mouse.up();
+    }
+  }
+
+  try {
+    await guest.goto(url);
+    await ready(guest);
+    // The receiver's camera is independent; the trail must use scene coordinates.
+    await guest.evaluate(() => {
+      window.__board.api.updateScene({
+        appState: { scrollX: 100, scrollY: 50, zoom: { value: 0.8 as AppState['zoom']['value'] } },
+      });
+    });
+    const pointer = await pointLaser(page, guest);
+    await expect.poll(() => redPixels(guest, pointer), { timeout: 5000 }).toBe(0);
+    await page.getByRole('button', { name: 'Select — выделение (V)', exact: true }).click();
+    await page.mouse.move(900, 700);
+    await expect
+      .poll(() =>
+        guest.evaluate(
+          () => [...window.__board.api.getAppState().collaborators.values()][0]?.pointer?.tool,
+        ),
+      )
+      .toBe('pointer');
+    await context.setOffline(true);
+    await expect(guest.getByRole('status')).toContainText('Нет связи');
+    await guest.keyboard.press('k');
+    await stroke(guest, 480, 400);
+    await context.setOffline(false);
+    await ready(guest);
+    await pointLaser(guest, page);
+    await guest.reload();
+    await ready(guest);
+    await pointLaser(page, guest);
+    await expect.poll(async () => (await elements(page)).length).toBe(0);
+    expect(await elements(guest)).toHaveLength(0);
+    expect(await page.evaluate(() => window.__board.session.doc.getMap('elements').size)).toBe(0);
+  } finally {
+    await context.close();
+  }
+});
+
 test('catalog layout and narrow viewport stay usable', async ({ page }) => {
   await page.goto('/');
   await expect(page.getByRole('heading', { name: 'Мои доски' })).toBeVisible();
@@ -410,4 +516,57 @@ test('image upload is available to a fresh guest and no CDN is required', async 
     await context.close();
   }
   expect(external).toEqual([]);
+});
+
+test('picture library inserts the cropped grid, supports undo and persists for a fresh guest', async ({
+  page,
+  browser,
+}) => {
+  await create(page, 'Координатная сетка');
+  const library = page.getByRole('button', { name: 'Библиотека картинок', exact: true });
+  await library.click();
+  await expect(page.getByRole('heading', { name: 'Библиотека картинок' })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.locator('dialog[open]')).toHaveCount(0);
+  expect(await elements(page)).toHaveLength(0);
+  await library.click();
+  await page.screenshot({ path: 'test-results/image-library.png' });
+  await page.getByRole('button', { name: 'Добавить: Координатная плоскость' }).click();
+  await ready(page);
+  await expect.poll(async () => (await elements(page)).length).toBe(1);
+  const grid = (await elements(page))[0];
+  expect(grid.type).toBe('image');
+  expect(grid.width).toBe(grid.height);
+  expect(
+    await page.evaluate((id) => !!window.__board.api.getAppState().selectedElementIds[id], grid.id),
+  ).toBe(true);
+  await page.keyboard.press('Control+z');
+  await expect.poll(async () => (await elements(page)).length).toBe(0);
+  await page.keyboard.press('Control+Shift+z');
+  await expect.poll(async () => (await elements(page)).length).toBe(1);
+  await ready(page);
+  await page.reload();
+  await ready(page);
+  await expect.poll(async () => (await elements(page)).length).toBe(1);
+  await page.getByRole('button', { name: 'Поделиться', exact: true }).click();
+  const url = await page.getByLabel('Ссылка для редактирования').inputValue();
+  const context = await browser.newContext();
+  try {
+    const guest = await context.newPage();
+    await guest.goto(url);
+    await ready(guest);
+    const expected =
+      'data:image/png;base64,' + readFileSync('src/assets/coordinate-grid.png').toString('base64');
+    await expect
+      .poll(() => guest.evaluate(() => Object.values(window.__board.api.getFiles())[0]?.dataURL))
+      .toBe(expected);
+    await guest.getByRole('button', { name: 'Библиотека картинок', exact: true }).click();
+    await guest.getByRole('button', { name: 'Добавить: Координатная плоскость' }).click();
+    await ready(guest);
+    await expect.poll(async () => (await elements(page)).length).toBe(2);
+    await expect.poll(async () => (await elements(guest)).length).toBe(2);
+    await guest.screenshot({ path: 'test-results/library-grid-on-board.png' });
+  } finally {
+    await context.close();
+  }
 });

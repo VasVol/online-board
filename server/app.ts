@@ -6,6 +6,7 @@ import { existsSync } from 'node:fs';
 import { z } from 'zod';
 import { Store, secret, hash, equal, type StoredBoard } from './database.js';
 import { SyncServer } from './sync.js';
+import { DeploymentGate } from './deployment.js';
 
 const nameSchema = z.object({ name: z.string().trim().min(1).max(120) });
 const tokenSchema = z.string().regex(/^[A-Za-z0-9_-]{43}$/);
@@ -27,6 +28,8 @@ export function createApp(options: {
   publicOrigin?: string;
   staticDir?: string;
   trustLocalProxy?: boolean;
+  revision?: string;
+  deployment?: DeploymentGate;
 }) {
   const store = new Store(options.dbPath);
   const app = express();
@@ -48,12 +51,18 @@ export function createApp(options: {
     const board = store.board(id);
     return !!board && (board.owner === hash(cookie(req)) || (!!key && equal(board.shareKey, key)));
   }
-  const sync = new SyncServer(server, store, authorized, originAllowed);
+  const deployment = options.deployment || new DeploymentGate();
+  const sync = new SyncServer(server, store, authorized, originAllowed, deployment);
   app.use((req, res, next) => {
     res.setHeader('Referrer-Policy', 'no-referrer');
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('X-Frame-Options', 'DENY');
     if (req.path.startsWith('/api')) res.setHeader('Cache-Control', 'no-store');
+    if (deployment.paused && !['GET', 'HEAD', 'OPTIONS'].includes(req.method)) {
+      res.setHeader('Retry-After', '5');
+      res.status(503).json({ error: 'Обновление доски. Повторите через несколько секунд.' });
+      return;
+    }
     if (!['GET', 'HEAD', 'OPTIONS'].includes(req.method) && !originAllowed(req)) {
       res.status(403).json({ error: 'Недопустимый источник запроса' });
       return;
@@ -69,7 +78,9 @@ export function createApp(options: {
       maxAge: 365 * 24 * 60 * 60 * 1000,
       path: '/',
     });
-  app.get('/api/health', (_req, res) => res.json({ ok: true, schema: 1 }));
+  app.get('/api/health', (_req, res) =>
+    res.json({ ok: true, schema: 1, revision: options.revision || 'development' }),
+  );
   app.post('/api/session', (req, res) => {
     if (!tokenSchema.safeParse(cookie(req)).success) setCookie(req, res, secret());
     res.json({ ok: true });
@@ -272,6 +283,7 @@ export function createApp(options: {
     server,
     store,
     sync,
+    deployment,
     close: async () => {
       await sync.close();
       await new Promise<void>((resolve) => server.close(() => resolve()));

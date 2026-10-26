@@ -37,6 +37,7 @@ export function Dialog({
       ref={ref}
       className="dialog"
       onCancel={onClose}
+      onKeyDown={(e) => e.stopPropagation()}
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}

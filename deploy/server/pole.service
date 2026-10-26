@@ -1,0 +1,36 @@
+[Unit]
+Description=Pole math whiteboard
+After=network.target
+
+[Service]
+Type=simple
+User=pole
+Group=pole
+WorkingDirectory=/opt/pole/current
+ExecStart=/usr/bin/node dist-server/server/index.js
+Environment=NODE_ENV=production
+Environment=HOST=127.0.0.1
+Environment=PORT=3001
+Environment=DATA_DIR=/var/lib/pole
+Environment=PUBLIC_ORIGIN=https://board.vasilyvolovich.com
+Environment=TRUST_LOCAL_PROXY=1
+Environment=DEPLOY_CONTROL_SOCKET=/run/pole/control.sock
+RuntimeDirectory=pole
+RuntimeDirectoryMode=0700
+StateDirectory=pole
+StateDirectoryMode=0700
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=30
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+
+[Install]
+WantedBy=multi-user.target

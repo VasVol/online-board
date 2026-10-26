@@ -1,0 +1,17 @@
+[Unit]
+Description=Public HTTPS hostname for Pole through Cloudflare
+Wants=pole.service
+After=pole.service network.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/cloudflared tunnel --no-autoupdate --protocol http2 --region us --edge-ip-version 4 --grace-period 10s --loglevel warn --metrics 127.0.0.1:20246 run --token-file %h/.config/online-board/cloudflare-token
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=20
+UMask=0077
+NoNewPrivileges=true
+
+[Install]
+WantedBy=default.target

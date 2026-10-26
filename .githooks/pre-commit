@@ -1,3 +1,13 @@
 #!/bin/sh
 set -eu
+if ! git diff --quiet || [ -n "$(git ls-files --others --exclude-standard)" ]; then
+  echo 'Commit refused: stage the intended complete change; checks must cover exactly the committed tree.' >&2
+  echo 'For unrelated unfinished work, use a separate worktree. Do not bypass this hook.' >&2
+  exit 1
+fi
+checked_tree=$(git write-tree)
 npm run check
+if ! git diff --quiet || [ "$(git write-tree)" != "$checked_tree" ] || [ -n "$(git ls-files --others --exclude-standard)" ]; then
+  echo 'Files changed during verification. Review and stage them, then commit again.' >&2
+  exit 1
+fi
