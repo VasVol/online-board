@@ -250,11 +250,12 @@ class Deployer:
                 shutil.rmtree(stage)
 
     def acquire(self):
+        require_idle = self.config.get("require_idle", True)
         if not Path(CONTROL).exists() and self.config.get("bootstrap_legacy") and not self.revision(self.current()):
             # One-time installation only: the old release predates the control socket.
             # Refuse any established backend connection for a full minute, then stop
             # BEFORE backup/switch. Remove bootstrap_legacy after the first deployment.
-            for _ in range(21):
+            for _ in range(21 if require_idle else 0):
                 connections = subprocess.check_output([
                     "ss", "-Htn", "state", "established", "( sport = :3001 )"], text=True)
                 if connections.strip():
@@ -263,7 +264,7 @@ class Deployer:
             command(["systemctl", "stop", "pole.service"])
             self.legacy_stopped = True
             return True
-        code, _ = control("POST", "/acquire")
+        code, _ = control("POST", "/acquire" if require_idle else "/acquire-now")
         return code == 200
 
     def release(self):

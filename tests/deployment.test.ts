@@ -58,6 +58,14 @@ test('deploy lease refuses active clients, blocks new writes/sockets, releases a
     await sleep(40);
     assert.equal(gate.clients, 1);
     assert.equal(await control('/acquire'), 409);
+    assert.equal(
+      await control('/acquire-now'),
+      200,
+      'development override is private and explicit',
+    );
+    assert.equal(gate.clients, 1, 'acquiring a lease does not discard an existing client');
+    assert.equal((await fetch(base + '/api/session', { method: 'POST' })).status, 503);
+    assert.equal(await control('/release'), 200);
     ws.close();
     await new Promise<void>((r) => ws.once('close', r));
     assert.equal(await control('/acquire'), 409, 'requires quiet period after disconnect');

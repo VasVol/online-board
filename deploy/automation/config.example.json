@@ -3,5 +3,6 @@
   "repository_id": 1432285563,
   "workflow_id": 396402665,
   "branch": "main",
-  "origin": "https://board.vasilyvolovich.com"
+  "origin": "https://board.vasilyvolovich.com",
+  "require_idle": true
 }

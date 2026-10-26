@@ -25,8 +25,9 @@ export class DeploymentGate {
   status() {
     return { clients: this.clients, idleMs: Date.now() - this.changedAt, paused: this.paused };
   }
-  acquire() {
-    if (this.clients || Date.now() - this.changedAt < this.idleMs) return false;
+  acquire(allowActiveClients = false) {
+    if (!allowActiveClients && (this.clients || Date.now() - this.changedAt < this.idleMs))
+      return false;
     this.leasedUntil = Date.now() + this.leaseMs;
     return true;
   }
@@ -39,8 +40,9 @@ export async function listenDeploymentControl(path: string, gate: DeploymentGate
   await rm(path, { force: true });
   const server = createServer((req, res) => {
     res.setHeader('Content-Type', 'application/json');
-    if (req.method === 'POST' && req.url === '/acquire') {
-      if (!gate.acquire()) res.statusCode = 409;
+    if (req.method === 'POST' && ['/acquire', '/acquire-now'].includes(req.url || '')) {
+      // Explicitly enabled by the owner during development; still Unix-socket-only.
+      if (!gate.acquire(req.url === '/acquire-now')) res.statusCode = 409;
     } else if (req.method === 'POST' && req.url === '/release') gate.release();
     else if (req.method !== 'GET' || req.url !== '/status') res.statusCode = 404;
     res.end(JSON.stringify(gate.status()));
