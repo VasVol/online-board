@@ -18,7 +18,9 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+        timeout-minutes: 5
       - run: npx playwright install --with-deps chromium --only-shell
+        timeout-minutes: 5
       # The VPS requires this exact successful step in the test job for this SHA.
       - name: Run full check
         run: npm run check
