@@ -3,7 +3,7 @@ import {
   convertToExcalidrawElements,
   viewportCoordsToSceneCoords,
 } from '@excalidraw/excalidraw';
-import type { ExcalidrawImperativeAPI, AppState } from '@excalidraw/excalidraw/types';
+import type { ExcalidrawImperativeAPI } from '@excalidraw/excalidraw/types';
 import { circleBounds, isTextTarget, type Point } from './geometry';
 export interface Preview {
   type: 'line' | 'ellipse';
@@ -14,26 +14,17 @@ export interface Preview {
   dash: string;
   opacity: number;
 }
-export function installHoldTools(
+export function installDrawingTools(
   root: HTMLElement,
   api: ExcalidrawImperativeAPI,
   preview: (value: Preview | null) => void,
 ) {
-  const held = new Set<string>();
-  let previous: AppState['activeTool'] | null = null;
   let gesture: {
     start: Point;
     clientStart: Point;
     type: 'line' | 'ellipse';
     pointerId: number;
   } | null = null;
-  function restore() {
-    if (!held.size && !gesture && previous) {
-      api.setActiveTool(previous);
-      previous = null;
-      preview(null);
-    }
-  }
   const down = (e: KeyboardEvent) => {
     if (
       e.ctrlKey ||
@@ -47,21 +38,23 @@ export function installHoldTools(
     e.preventDefault();
     e.stopImmediatePropagation();
     if (e.repeat) return;
-    if (!previous) previous = api.getAppState().activeTool;
-    held.add(e.code);
-    api.setActiveTool({ type: e.code === 'KeyL' ? 'line' : 'ellipse', locked: true });
-  };
-  const up = (e: KeyboardEvent) => {
-    if (!held.has(e.code)) return;
-    e.preventDefault();
-    e.stopImmediatePropagation();
-    held.delete(e.code);
-    if (held.size && !gesture)
-      api.setActiveTool({ type: [...held].at(-1) === 'KeyL' ? 'line' : 'ellipse', locked: true });
-    restore();
+    api.setActiveTool({
+      type: 'custom',
+      customType: e.code === 'KeyL' ? 'straight' : 'circle',
+      locked: true,
+    });
   };
   const pointerDown = (e: PointerEvent) => {
-    if (!held.size || e.button !== 0 || !(e.target instanceof HTMLCanvasElement)) return;
+    const state = api.getAppState();
+    const tool = state.activeTool;
+    if (
+      state.viewModeEnabled ||
+      tool.type !== 'custom' ||
+      !['straight', 'circle'].includes(tool.customType ?? '') ||
+      e.button !== 0 ||
+      !(e.target instanceof HTMLCanvasElement)
+    )
+      return;
     e.preventDefault();
     e.stopImmediatePropagation();
     gesture = {
@@ -70,7 +63,7 @@ export function installHoldTools(
         api.getAppState(),
       ),
       clientStart: { x: e.clientX, y: e.clientY },
-      type: [...held].at(-1) === 'KeyL' ? 'line' : 'ellipse',
+      type: tool.customType === 'straight' ? 'line' : 'ellipse',
       pointerId: e.pointerId,
     };
     root.setPointerCapture(e.pointerId);
@@ -136,25 +129,33 @@ export function installHoldTools(
     root.releasePointerCapture(e.pointerId);
     gesture = null;
     preview(null);
-    restore();
   };
   const cancel = () => {
-    held.clear();
+    if (gesture && root.hasPointerCapture(gesture.pointerId))
+      root.releasePointerCapture(gesture.pointerId);
     gesture = null;
     preview(null);
-    restore();
   };
+  const unsubscribe = api.onChange(() => {
+    if (gesture) {
+      const tool = api.getAppState().activeTool;
+      if (
+        tool.type !== 'custom' ||
+        tool.customType !== (gesture.type === 'line' ? 'straight' : 'circle')
+      )
+        cancel();
+    }
+  });
   window.addEventListener('keydown', down, true);
-  window.addEventListener('keyup', up, true);
   root.addEventListener('pointerdown', pointerDown, true);
   window.addEventListener('pointermove', pointerMove, true);
   window.addEventListener('pointerup', pointerUp, true);
   window.addEventListener('blur', cancel);
   window.addEventListener('pointercancel', cancel);
   return () => {
+    unsubscribe();
     cancel();
     window.removeEventListener('keydown', down, true);
-    window.removeEventListener('keyup', up, true);
     root.removeEventListener('pointerdown', pointerDown, true);
     window.removeEventListener('pointermove', pointerMove, true);
     window.removeEventListener('pointerup', pointerUp, true);

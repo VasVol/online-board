@@ -13,6 +13,7 @@ import * as decoding from 'lib0/decoding';
 import type { Store } from './database.js';
 import type { IncomingMessage } from 'node:http';
 import type { DeploymentGate } from './deployment.js';
+import type { BoardEvent } from '../shared/board-controls.js';
 
 const MAX_PAYLOAD = 8 * 1024 * 1024;
 interface Peer {
@@ -89,6 +90,17 @@ export class SyncServer {
       return;
     }
     ws.send(data);
+  }
+  private boardEvent(event: BoardEvent) {
+    const out = encoding.createEncoder();
+    encoding.writeVarUint(out, 5);
+    encoding.writeVarString(out, JSON.stringify(event));
+    return encoding.toUint8Array(out);
+  }
+  broadcastBoardEvent(boardId: string, event: BoardEvent) {
+    const data = this.boardEvent(event);
+    for (const room of this.rooms.values())
+      if (room.boardId === boardId) this.broadcast(room, data);
   }
   private broadcast(room: Room, data: Uint8Array) {
     for (const ws of room.peers.keys()) this.send(ws, data);
@@ -223,6 +235,7 @@ export class SyncServer {
     encoding.writeVarUint(out, 0);
     sync.writeSyncStep1(out, room.doc);
     this.send(ws, encoding.toUint8Array(out));
+    this.send(ws, this.boardEvent({ type: 'grid', ...this.store.grid(boardId) }));
     if (room.awareness.getStates().size) {
       const presence = encoding.createEncoder();
       encoding.writeVarUint(presence, 1);

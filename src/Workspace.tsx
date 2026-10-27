@@ -17,6 +17,7 @@ import {
 import type { Page, PageList, BoardDetails } from '../shared/types';
 import type { ConnectionState } from './canvas/session';
 import { request, json, boardKey } from './api';
+import { useBoardControls } from './useBoardControls';
 import { Logo, Dialog, NameDialog, Pager, message } from './components/ui';
 const Canvas = lazy(() => import('./canvas/Canvas'));
 export default function Workspace({ id }: { id: string }) {
@@ -40,6 +41,8 @@ export default function Workspace({ id }: { id: string }) {
   const currentRef = useRef(current);
   currentRef.current = current;
   const selectPage = useCallback((page: Page) => {
+    if (currentRef.current?.id === page.id) return;
+    currentRef.current = page;
     setCurrent(page);
     setStatus('loading');
     setPeople([]);
@@ -47,6 +50,7 @@ export default function Workspace({ id }: { id: string }) {
     url.searchParams.set('page', page.id);
     history.replaceState(null, '', url);
   }, []);
+  const controls = useBoardControls(id, selectPage, setError);
   const load = useCallback(async () => {
     const [board, list] = await Promise.all([
       request<BoardDetails>(`/boards/${id}`),
@@ -55,6 +59,7 @@ export default function Workspace({ id }: { id: string }) {
       ),
     ]);
     setDetails(board);
+    controls.acceptGrid({ enabled: board.board.gridEnabled, revision: board.board.gridRevision });
     setPages(list);
     if (!currentRef.current) {
       const requested = new URL(location.href).searchParams.get('page');
@@ -66,7 +71,7 @@ export default function Workspace({ id }: { id: string }) {
       const page = list.items.find((p) => p.id === currentRef.current?.id);
       if (page) setCurrent(page);
     }
-  }, [id, query, offset, selectPage]);
+  }, [id, query, offset, selectPage, controls.acceptGrid]);
   useEffect(() => {
     let active = true;
     const refresh = () => {
@@ -150,6 +155,22 @@ export default function Workspace({ id }: { id: string }) {
             <Users size={16} />
             <span>{people.length + 1}</span>
           </button>
+          {details?.isOwner && (
+            <button
+              className="button secondary gather-button"
+              disabled={
+                !current ||
+                controls.gatherBusy ||
+                status === 'loading' ||
+                status === 'offline' ||
+                status === 'denied'
+              }
+              onClick={() => current && void controls.gather(current.id)}
+              title="Перевести всех на вашу страницу и показать то же место"
+            >
+              <Users size={17} /> Собрать всех
+            </button>
+          )}
           <button className="button primary share-button" onClick={() => void shareBoard()}>
             <Link2 size={17} />
             Поделиться
@@ -267,6 +288,13 @@ export default function Workspace({ id }: { id: string }) {
                 onStatus={setStatus}
                 onPeople={setPeople}
                 onError={setError}
+                grid={controls.grid.enabled}
+                gridBusy={controls.gridBusy}
+                onToggleGrid={() => void controls.toggleGrid()}
+                onBoardEvent={controls.onEvent}
+                onCameraReady={controls.cameraReady}
+                cameraTarget={controls.target}
+                onCameraApplied={controls.targetApplied}
               />
             </Suspense>
           ) : (
@@ -416,13 +444,13 @@ export default function Workspace({ id }: { id: string }) {
             </dt>
             <dd>Eraser: удаление целого штриха</dd>
             <dt>
-              Удерживать <kbd>L</kbd>
+              <kbd>L</kbd>
             </dt>
-            <dd>Прямая, затем возврат к перу</dd>
+            <dd>Выбрать прямую; инструмент остаётся выбранным</dd>
             <dt>
-              Удерживать <kbd>C</kbd>
+              <kbd>C</kbd>
             </dt>
-            <dd>Окружность, затем возврат к перу</dd>
+            <dd>Выбрать окружность; инструмент остаётся выбранным</dd>
             <dt>
               <kbd>V</kbd> / <kbd>1</kbd>
             </dt>

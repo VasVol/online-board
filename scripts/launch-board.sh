@@ -25,7 +25,7 @@ if [ "$local_board" = false ] && [ -f "$server_config" ]; then
   [[ "$url" =~ ^https://[a-zA-Z0-9.-]+$ ]] || fail 'Некорректный адрес в server-url.'
   if [ "$check" = true ]; then
     curl --connect-timeout 5 --max-time 15 --silent --fail "$url/api/health" |
-      python3 -c 'import json,sys; r=json.load(sys.stdin); sys.exit(0 if r.get("ok") is True and r.get("schema")==1 else 1)' || fail 'Серверная доска пока не отвечает.'
+      python3 -c 'import json,sys; r=json.load(sys.stdin); sys.exit(0 if r.get("ok") is True and r.get("schema") in (1,2) else 1)' || fail 'Серверная доска пока не отвечает.'
     printf 'Поле работает на сервере: %s\n' "$url"
   else
     xdg-open "$url" || fail "Откройте $url в браузере."
@@ -38,7 +38,7 @@ systemctl --user start pole.service || fail 'Не удалось запусти�
 healthy=false
 for attempt in {1..40}; do
   if curl --noproxy '*' --connect-timeout 1 --max-time 1 --silent --fail "${url}api/health" |
-    python3 -c 'import json,sys; r=json.load(sys.stdin); sys.exit(0 if r.get("ok") is True and r.get("schema")==1 else 1)' 2>/dev/null; then
+    python3 -c 'import json,sys; r=json.load(sys.stdin); sys.exit(0 if r.get("ok") is True and r.get("schema") in (1,2) else 1)' 2>/dev/null; then
     healthy=true
     break
   fi

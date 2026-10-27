@@ -130,7 +130,7 @@ def health(base, sha, wait=30):
         try:
             with urllib.request.urlopen(base + "/api/health", timeout=10) as response:
                 data = json.load(response)
-            if data.get("ok") is True and (sha is None or data.get("revision") == sha) and data.get("schema") == 1:
+            if data.get("ok") is True and (sha is None or data.get("revision") == sha) and data.get("schema") in (1, 2):
                 return
         except (OSError, ValueError):
             pass

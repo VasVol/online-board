@@ -7,6 +7,8 @@ import { z } from 'zod';
 import { Store, secret, hash, equal, type StoredBoard } from './database.js';
 import { SyncServer } from './sync.js';
 import { DeploymentGate } from './deployment.js';
+import { installBoardControls } from './board-controls.js';
+import { SCHEMA_VERSION } from '../shared/types.js';
 
 const nameSchema = z.object({ name: z.string().trim().min(1).max(120) });
 const tokenSchema = z.string().regex(/^[A-Za-z0-9_-]{43}$/);
@@ -79,7 +81,7 @@ export function createApp(options: {
       path: '/',
     });
   app.get('/api/health', (_req, res) =>
-    res.json({ ok: true, schema: 1, revision: options.revision || 'development' }),
+    res.json({ ok: true, schema: SCHEMA_VERSION, revision: options.revision || 'development' }),
   );
   app.post('/api/session', (req, res) => {
     if (!tokenSchema.safeParse(cookie(req)).success) setCookie(req, res, secret());
@@ -163,6 +165,7 @@ export function createApp(options: {
     }
     next();
   };
+  installBoardControls(app, store, sync, ownerOnly, rateLimit);
   app.get('/api/boards/:boardId', (_req, res) =>
     res.json({ board: publicBoard(res.locals.board), isOwner: res.locals.isOwner }),
   );

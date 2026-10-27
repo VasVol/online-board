@@ -49,24 +49,22 @@ async function stroke(page: Page, x = 480, y = 370) {
   await page.mouse.up();
 }
 
-test('drawing, held L/C, styles, undo/redo, pages and reload', async ({ page }) => {
+test('drawing, persistent L/C, styles, undo/redo, pages and reload', async ({ page }) => {
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(e.message));
   await create(page);
   await stroke(page);
   await expect.poll(async () => (await elements(page)).length).toBe(1);
   expect((await elements(page))[0].type).toBe('freedraw');
-  await page.keyboard.down('KeyL');
+  await page.keyboard.press('KeyL');
   await stroke(page, 490, 480);
-  await page.keyboard.up('KeyL');
   await expect.poll(async () => (await elements(page)).length).toBe(2);
   expect((await elements(page))[1].type).toBe('line');
-  expect(await page.evaluate(() => window.__board.api.getAppState().activeTool.type)).toBe(
-    'freedraw',
+  expect(await page.evaluate(() => window.__board.api.getAppState().activeTool.customType)).toBe(
+    'straight',
   );
-  await page.keyboard.down('KeyC');
+  await page.keyboard.press('KeyC');
   await stroke(page, 720, 400);
-  await page.keyboard.up('KeyC');
   await expect.poll(async () => (await elements(page)).length).toBe(3);
   const circle = (await elements(page))[2];
   expect(circle.type).toBe('ellipse');
@@ -370,9 +368,14 @@ test('laser pointer is visible to another browser, fades and works after reconne
         height: 64,
       };
     }, point);
-    // Rasterize an actual browser screenshot: laser trails are in the SVG overlay,
+    // Rasterize an actual browser screenshot: laser trails are in a separate overlay,
     // so checking only the scene or the static Canvas would miss this regression.
-    const screenshot = await receiver.screenshot({ clip });
+    // A participant's randomly colored cursor can also be red. Exclude just that
+    // independent overlay so the assertion measures the actual laser trail.
+    const screenshot = await receiver.screenshot({
+      clip,
+      style: '.remote-cursors { visibility: hidden !important; }',
+    });
     return receiver.evaluate(async (base64) => {
       const image = new Image();
       image.src = 'data:image/png;base64,' + base64;
@@ -425,6 +428,35 @@ test('laser pointer is visible to another browser, fades and works after reconne
         appState: { scrollX: 100, scrollY: 50, zoom: { value: 0.8 as AppState['zoom']['value'] } },
       });
     });
+    // Older portions must survive many seconds and a brief lift between strokes.
+    // Probe an early point away from the current head in BOTH independent clients.
+    await page.keyboard.press('k');
+    const box = (await page.getByTestId('drawing-surface').boundingBox())!;
+    await page.mouse.move(box.x + 400, box.y + 300);
+    await page.mouse.down();
+    await page.mouse.move(box.x + 440, box.y + 300, { steps: 5 });
+    const first = await page.evaluate(
+      () => window.__board.session.provider.awareness.getLocalState()!.pointer,
+    );
+    for (let i = 1; i <= 20; i++) {
+      await page.mouse.move(box.x + 440 + i * 8, box.y + 300);
+      await page.waitForTimeout(100);
+    }
+    await page.mouse.up();
+    await page.waitForTimeout(150);
+    await page.mouse.move(box.x + 400, box.y + 420);
+    await page.mouse.down();
+    for (let i = 1; i <= 20; i++) {
+      await page.mouse.move(box.x + 400 + i * 8, box.y + 420);
+      await page.waitForTimeout(100);
+    }
+    expect(await redPixels(page, first)).toBeGreaterThan(20);
+    expect(await redPixels(guest, first)).toBeGreaterThan(20);
+    await guest.screenshot({ path: 'test-results/retained-laser.png' });
+    // Stopping movement also fades the drawing while the button remains held.
+    await expect.poll(() => redPixels(page, first), { timeout: 5000 }).toBe(0);
+    await expect.poll(() => redPixels(guest, first), { timeout: 5000 }).toBe(0);
+    await page.mouse.up();
     const pointer = await pointLaser(page, guest);
     await expect.poll(() => redPixels(guest, pointer), { timeout: 5000 }).toBe(0);
     await page.getByRole('button', { name: 'Select — выделение (V)', exact: true }).click();

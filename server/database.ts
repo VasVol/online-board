@@ -4,6 +4,7 @@ import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import * as Y from 'yjs';
 import type { Board, Page } from '../shared/types.js';
+import { SCHEMA_VERSION } from '../shared/types.js';
 
 export const secret = () => randomBytes(32).toString('base64url');
 export const hash = (value: string) => createHash('sha256').update(value).digest('hex');
@@ -12,7 +13,7 @@ export const equal = (a: string, b: string) =>
 export type StoredBoard = Board & { owner: string; shareKey: string };
 export class Store {
   db: Database.Database;
-  constructor(path: string) {
+  constructor(path: string, options: { allowMigration?: boolean } = {}) {
     if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
     this.db = new Database(path);
     this.db.function('fold', { deterministic: true }, (value: unknown) =>
@@ -23,7 +24,14 @@ export class Store {
     this.db.pragma('foreign_keys = ON');
     this.db.pragma('busy_timeout = 5000');
     const version = this.db.pragma('user_version', { simple: true }) as number;
-    if (version > 1) throw new Error('Database schema is newer than this application');
+    if (version > SCHEMA_VERSION || (version === 1 && !options.allowMigration)) {
+      this.db.close();
+      throw new Error(
+        version > SCHEMA_VERSION
+          ? 'Database schema is newer than this application'
+          : 'Schema 1 requires an offline backup and explicit migration: npm run migrate -- /path/to/board.sqlite',
+      );
+    }
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS boards (id TEXT PRIMARY KEY, name TEXT NOT NULL, owner TEXT NOT NULL,
         shareKey TEXT NOT NULL, createdAt INTEGER NOT NULL, updatedAt INTEGER NOT NULL, deletedAt INTEGER);
@@ -35,8 +43,23 @@ export class Store {
       CREATE TABLE IF NOT EXISTS updates (id INTEGER PRIMARY KEY AUTOINCREMENT, pageId TEXT NOT NULL REFERENCES pages(id), data BLOB NOT NULL);
       CREATE INDEX IF NOT EXISTS updates_page ON updates(pageId);
       CREATE TABLE IF NOT EXISTS files (boardId TEXT NOT NULL REFERENCES boards(id), id TEXT NOT NULL, data TEXT NOT NULL, PRIMARY KEY(boardId, id));
-      PRAGMA user_version = 1;
+
     `);
+    // Additive, atomic v1 → v2 migration. A failed ALTER rolls the transaction back.
+    if (version < 2) {
+      try {
+        this.db.transaction(() => {
+          this.db.exec(`
+            ALTER TABLE boards ADD COLUMN gridEnabled INTEGER NOT NULL DEFAULT 0 CHECK(gridEnabled IN (0,1));
+            ALTER TABLE boards ADD COLUMN gridRevision INTEGER NOT NULL DEFAULT 0;
+            PRAGMA user_version = 2;
+          `);
+        })();
+      } catch (error) {
+        this.db.close();
+        throw error;
+      }
+    }
   }
   createBoard(owner: string, name: string) {
     return this.db.transaction(() => {
@@ -47,6 +70,8 @@ export class Store {
         shareKey: secret(),
         createdAt: Date.now(),
         updatedAt: Date.now(),
+        gridEnabled: false,
+        gridRevision: 0,
       };
       this.db
         .prepare(
@@ -58,8 +83,10 @@ export class Store {
     })();
   }
   board(id: string) {
-    return this.db.prepare('SELECT * FROM boards WHERE id=? AND deletedAt IS NULL').get(id) as
-      StoredBoard | undefined;
+    const board = this.db
+      .prepare('SELECT * FROM boards WHERE id=? AND deletedAt IS NULL')
+      .get(id) as StoredBoard | undefined;
+    return board ? { ...board, gridEnabled: !!board.gridEnabled } : undefined;
   }
   page(id: string) {
     return this.db
@@ -78,10 +105,15 @@ export class Store {
     ).n;
     const items = this.db
       .prepare(
-        `SELECT id,name,createdAt,updatedAt,(SELECT count(*) FROM pages WHERE boardId=boards.id AND deletedAt IS NULL) AS pageCount FROM boards WHERE ${condition} ORDER BY updatedAt DESC,id LIMIT ? OFFSET ?`,
+        `SELECT id,name,createdAt,updatedAt,gridEnabled,gridRevision,(SELECT count(*) FROM pages WHERE boardId=boards.id AND deletedAt IS NULL) AS pageCount FROM boards WHERE ${condition} ORDER BY updatedAt DESC,id LIMIT ? OFFSET ?`,
       )
       .all(...args, limit, offset) as Board[];
-    return { items, total, limit, offset };
+    return {
+      items: items.map((board) => ({ ...board, gridEnabled: !!board.gridEnabled })),
+      total,
+      limit,
+      offset,
+    };
   }
   listPages(boardId: string, q: string, limit: number, offset: number) {
     const args = [boardId, `%${q.replace(/[\\%_]/g, '\\$&')}%`];
@@ -123,6 +155,19 @@ export class Store {
   }
   touch(boardId: string) {
     this.db.prepare('UPDATE boards SET updatedAt=? WHERE id=?').run(Date.now(), boardId);
+  }
+  grid(id: string) {
+    const board = this.board(id);
+    if (!board) throw new Error('Board unavailable');
+    return { enabled: board.gridEnabled, revision: board.gridRevision };
+  }
+  setGrid(id: string, enabled: boolean) {
+    this.db
+      .prepare(
+        'UPDATE boards SET gridEnabled=?,gridRevision=gridRevision+1 WHERE id=? AND deletedAt IS NULL',
+      )
+      .run(Number(enabled), id);
+    return this.grid(id);
   }
   renameBoard(id: string, name: string) {
     this.db.prepare('UPDATE boards SET name=?,updatedAt=? WHERE id=?').run(name, Date.now(), id);

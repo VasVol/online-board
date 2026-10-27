@@ -131,6 +131,7 @@ async function setup() {
         params: { key: access },
       },
     );
+    provider.messageHandlers[5] = () => {};
     clients.push(provider);
     return provider;
   }
@@ -394,6 +395,7 @@ test('acknowledged data survives SIGKILL of a separate test server process', asy
         shouldReconnect: () => false,
       },
     );
+    client.messageHandlers[5] = () => {};
     await until(() => client!.synced);
     client.doc.getMap('elements').set('durable', { x: 42 });
     let ack = false;

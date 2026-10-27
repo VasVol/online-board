@@ -4,6 +4,7 @@ import { WebsocketProvider } from 'y-websocket';
 import * as encoding from 'lib0/encoding';
 import * as decoding from 'lib0/decoding';
 import { boardKey } from '../api';
+import { isBoardEvent, type BoardEvent, type GridState } from '../../shared/board-controls';
 export type ConnectionState = 'loading' | 'saved' | 'saving' | 'offline' | 'denied';
 export class PageSession {
   doc = new Y.Doc();
@@ -24,6 +25,8 @@ export class PageSession {
   private state: ConnectionState = 'loading';
   private timer?: ReturnType<typeof setTimeout>;
   onStatus: (state: ConnectionState) => void = () => {};
+  onBoardEvent: (event: BoardEvent) => void = () => {};
+  grid: GridState | null = null;
   constructor(boardId: string, pageId: string) {
     this.local = new IndexeddbPersistence(`pole:v1:${boardId}:${pageId}`, this.doc);
     const protocol = location.protocol === 'https:' ? 'wss' : 'ws';
@@ -33,6 +36,12 @@ export class PageSession {
       this.doc,
       { connect: false, disableBc: true, params: { key: boardKey(boardId) } },
     );
+    this.provider.messageHandlers[5] = (_encoder, decoder) => {
+      const event: unknown = JSON.parse(decoding.readVarString(decoder));
+      if (!isBoardEvent(event)) return;
+      if (event.type === 'grid') this.grid = event;
+      this.onBoardEvent(event);
+    };
     this.provider.messageHandlers[4] = (_encoder, decoder) => {
       const ack = decoding.readVarUint(decoder);
       this.lastAck = ack;

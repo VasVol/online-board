@@ -16,6 +16,7 @@
     "check": "npm run typecheck && npm test && npm run test:deploy && npm run test:e2e && npm run test:e2e:production && npm run build",
     "test:deploy": "python3 -m unittest discover -s deploy/automation -p 'test_*.py' -v",
     "prepare": "node scripts/install-hooks.mjs",
+    "migrate": "tsx scripts/migrate-schema.ts",
     "backup": "tsx scripts/backup.ts",
     "bench": "tsx scripts/benchmark.ts",
     "predev": "node scripts/patch-excalidraw.mjs && node scripts/assets.mjs",
@@ -24,7 +25,7 @@
     "postinstall": "node scripts/patch-excalidraw.mjs",
     "pretest:e2e": "node scripts/patch-excalidraw.mjs",
     "install:desktop": "python3 scripts/install-desktop.py",
-    "test:e2e:production": "node scripts/patch-excalidraw.mjs && E2E_PRODUCTION=1 playwright test --grep \"pen width stays|picture library|laser pointer\""
+    "test:e2e:production": "node scripts/patch-excalidraw.mjs && E2E_PRODUCTION=1 playwright test --grep \"pen width stays|picture library|laser pointer|following matches|cursor labels|sharp corners|persistent tools|shared grid|owner gathers\""
   },
   "dependencies": {
     "@excalidraw/excalidraw": "0.18.1",

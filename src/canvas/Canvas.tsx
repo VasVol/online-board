@@ -30,14 +30,22 @@ import {
   Grid2X2,
   ImagePlus,
   Images,
+  Tags,
+  Minus,
+  Circle,
 } from 'lucide-react';
 import { PageSession, type ConnectionState } from './session';
 import { SceneBinding, readElements } from './scene';
 import { FileBridge } from './files';
 import { insertImage } from './insert-image';
 import { ImageLibrary } from './ImageLibrary';
-import { installHoldTools, type Preview } from './hold-tools';
+import { installDrawingTools, type Preview } from './drawing-tools';
+import { readViewport, applyViewport } from './viewport';
+import type { BoardEvent, GatherCommand, Viewport } from '../../shared/board-controls';
 import { circleBounds } from './geometry';
+import { LaserOverlay } from './laser-overlay';
+import { RemoteCursors } from './RemoteCursors';
+import { installFollowing } from './follow';
 import { download } from '../api';
 
 type Props = {
@@ -48,6 +56,13 @@ type Props = {
   onStatus: (state: ConnectionState) => void;
   onPeople: (names: string[]) => void;
   onError: (error: string) => void;
+  grid: boolean;
+  gridBusy: boolean;
+  onToggleGrid: () => void;
+  onBoardEvent: (event: BoardEvent) => void;
+  onCameraReady: (read: (() => Viewport) | null) => void;
+  cameraTarget: GatherCommand | null;
+  onCameraApplied: (id: string) => void;
 };
 type PenStyle = 'solid' | 'marker' | 'dashed' | 'dotted';
 export default function Canvas(props: Props) {
@@ -58,10 +73,11 @@ export default function Canvas(props: Props) {
   const [connection, setConnection] = useState<ConnectionState>('loading');
   const connectionRef = useRef<ConnectionState>('loading');
   const imagePending = useRef(false);
+  const laser = useRef<LaserOverlay | null>(null);
   const [penStyle, setPenStyle] = useState<PenStyle>('solid');
   const [color, setColor] = useState('#28354a');
   const [width, setWidth] = useState(2);
-  const [grid, setGrid] = useState(false);
+  const [cursorNames, setCursorNames] = useState(false);
   const [library, setLibrary] = useState(false);
   const root = useRef<HTMLDivElement>(null);
   const imageInput = useRef<HTMLInputElement>(null);
@@ -81,6 +97,7 @@ export default function Canvas(props: Props) {
       setConnection(state);
       handlers.current.onStatus(state === 'saved' && imagePending.current ? 'saving' : state);
     };
+    current.onBoardEvent = (event) => handlers.current.onBoardEvent(event);
     let disposed = false;
     void current
       .start()
@@ -134,14 +151,17 @@ export default function Canvas(props: Props) {
     api.updateScene({ elements: initial, captureUpdate: CaptureUpdateAction.NEVER });
     api.history.clear();
     const awareness = session.provider.awareness;
+    laser.current = new LaserOverlay(root.current, api);
     const presence = () => {
       const collaborators = new Map<SocketId, Collaborator>();
       const names: string[] = [];
+      laser.current?.retain(new Set(awareness.getStates().keys()));
       for (const [id, value] of awareness.getStates()) {
         if (id === session.doc.clientID) continue;
         const name = typeof value.name === 'string' ? value.name.slice(0, 40) : 'Участник';
         names.push(name);
         const pointer = value.pointer;
+        laser.current?.update(id, pointer, value.button);
         collaborators.set(String(id) as SocketId, {
           username: name,
           ...(pointer && Number.isFinite(pointer.x) && Number.isFinite(pointer.y)
@@ -151,6 +171,7 @@ export default function Canvas(props: Props) {
                   y: pointer.y,
                   tool: pointer.tool === 'laser' ? ('laser' as const) : ('pointer' as const),
                   laserColor: DEFAULT_LASER_COLOR,
+                  renderCursor: false,
                 },
               }
             : {
@@ -174,7 +195,8 @@ export default function Canvas(props: Props) {
     awareness.on('change', presence);
     awareness.setLocalStateField('name', props.username);
     presence();
-    const removeHold = installHoldTools(root.current, api, setPreview);
+    const removeFollowing = installFollowing(api, awareness);
+    const removeTools = installDrawingTools(root.current, api, setPreview);
     const pointerDown = (event: PointerEvent) => {
       if (event.target instanceof HTMLCanvasElement && event.button === 0) {
         interacting = true;
@@ -231,7 +253,10 @@ export default function Canvas(props: Props) {
     return () => {
       flush();
       cancelAnimationFrame(raf);
-      removeHold();
+      removeTools();
+      removeFollowing();
+      laser.current?.destroy();
+      laser.current = null;
       root.current?.removeEventListener('pointerdown', pointerDown, true);
       window.removeEventListener('pointerup', pointerUp);
       window.removeEventListener('pointercancel', pointerUp);
@@ -246,6 +271,21 @@ export default function Canvas(props: Props) {
   useEffect(() => {
     session?.provider.awareness.setLocalStateField('name', props.username);
   }, [session, props.username]);
+  useEffect(() => {
+    if (!api) return;
+    handlers.current.onCameraReady(() => readViewport(api.getAppState()));
+    return () => handlers.current.onCameraReady(null);
+  }, [api]);
+  useEffect(() => {
+    const target = props.cameraTarget;
+    if (!api || !session || !target || target.pageId !== props.pageId) return;
+    flush();
+    api.updateScene({
+      appState: { ...applyViewport(api.getAppState(), target.viewport), userToFollow: null },
+      captureUpdate: CaptureUpdateAction.NEVER,
+    });
+    handlers.current.onCameraApplied(target.id);
+  }, [api, session, props.cameraTarget, props.pageId]);
   function flush() {
     clearTimeout(timer.current);
     timer.current = undefined;
@@ -256,7 +296,11 @@ export default function Canvas(props: Props) {
     }
   }
   function change(elements: readonly ExcalidrawElement[], state: AppState, binary: BinaryFiles) {
-    setTool((previous) => (previous === state.activeTool.type ? previous : state.activeTool.type));
+    const nextTool =
+      state.activeTool.type === 'custom'
+        ? (state.activeTool.customType ?? 'custom')
+        : state.activeTool.type;
+    setTool((previous) => (previous === nextTool ? previous : nextTool));
     if (!binding.current) return;
     pending.current = elements;
     if (!timer.current)
@@ -266,8 +310,10 @@ export default function Canvas(props: Props) {
       }, 40);
     files.current?.accept(binary);
   }
-  function chooseTool(type: 'freedraw' | 'selection' | 'hand' | 'eraser') {
-    api?.setActiveTool({ type, locked: true });
+  function chooseTool(type: 'freedraw' | 'selection' | 'hand' | 'eraser' | 'straight' | 'circle') {
+    if (type === 'straight' || type === 'circle')
+      api?.setActiveTool({ type: 'custom', customType: type, locked: true });
+    else api?.setActiveTool({ type, locked: true });
   }
   function style(nextColor: string, nextWidth: number, nextStyle: PenStyle) {
     setColor(nextColor);
@@ -343,6 +389,8 @@ export default function Canvas(props: Props) {
               { type: 'selection', label: 'Select — выделение (V)', icon: MousePointer2 },
               { type: 'hand', label: 'Hand — перемещение (H)', icon: Hand },
               { type: 'freedraw', label: 'Draw — карандаш (P)', icon: Pencil },
+              { type: 'straight', label: 'Прямая (L)', icon: Minus },
+              { type: 'circle', label: 'Окружность (C)', icon: Circle },
               { type: 'eraser', label: 'Eraser — ластик (E)', icon: Eraser },
             ] as const
           ).map(({ type, label, icon: Icon }) => (
@@ -423,9 +471,15 @@ export default function Canvas(props: Props) {
         <button
           aria-label="Сетка"
           title="Сетка"
-          aria-pressed={grid}
-          onClick={() => setGrid(!grid)}
-          className={grid ? 'selected' : ''}
+          aria-pressed={props.grid}
+          onClick={props.onToggleGrid}
+          disabled={
+            props.gridBusy ||
+            connection === 'offline' ||
+            connection === 'loading' ||
+            connection === 'denied'
+          }
+          className={props.grid ? 'selected' : ''}
         >
           <Grid2X2 size={18} />
         </button>
@@ -436,8 +490,17 @@ export default function Canvas(props: Props) {
         >
           <Maximize size={18} />
         </button>
+        <button
+          aria-label="Подписи курсоров"
+          title="Подписи курсоров"
+          aria-pressed={cursorNames}
+          className={cursorNames ? 'selected' : ''}
+          onClick={() => setCursorNames(!cursorNames)}
+        >
+          <Tags size={18} />
+        </button>
         <div className="key-hints">
-          <kbd>L</kbd> прямая <kbd>C</kbd> окружность <span>· удерживайте</span>
+          <kbd>L</kbd> прямая <kbd>C</kbd> окружность <span>· нажмите для выбора</span>
         </div>
       </aside>
       {library && <ImageLibrary onInsert={addImage} onClose={() => setLibrary(false)} />}
@@ -457,6 +520,7 @@ export default function Canvas(props: Props) {
                 currentItemStrokeColor: '#28354a',
                 currentItemStrokeWidth: 2,
                 currentItemRoughness: 0,
+                currentItemRoundness: 'sharp',
                 viewBackgroundColor: '#ffffff',
               },
             }}
@@ -465,10 +529,11 @@ export default function Canvas(props: Props) {
             viewModeEnabled={connection === 'denied'}
             handleKeyboardGlobally
             isCollaborating
-            gridModeEnabled={grid}
+            gridModeEnabled={props.grid}
             validateEmbeddable={false}
             onPointerUpdate={({ pointer, button }) => {
               const awareness = session.provider.awareness;
+              laser.current?.update(session.doc.clientID, pointer, button);
               // Publish the tool, position and button in one ephemeral update.
               awareness.setLocalState({ ...awareness.getLocalState(), pointer, button });
             }}
@@ -492,6 +557,9 @@ export default function Canvas(props: Props) {
           </Excalidraw>
         ) : (
           <div className="canvas-loading">Открываем страницу…</div>
+        )}
+        {api && session && (
+          <RemoteCursors api={api} awareness={session.provider.awareness} names={cursorNames} />
         )}
         {preview && (
           <svg className="shape-preview" aria-hidden="true">

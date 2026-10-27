@@ -4,6 +4,8 @@ export interface Board {
   createdAt: number;
   updatedAt: number;
   pageCount?: number;
+  gridEnabled: boolean;
+  gridRevision: number;
 }
 export interface Page {
   id: string;
@@ -22,4 +24,4 @@ export interface BoardDetails {
   board: Board;
   isOwner: boolean;
 }
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;

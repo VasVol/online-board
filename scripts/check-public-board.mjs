@@ -82,24 +82,37 @@ async function colors(page) {
     return red > 100 && blue > 100;
   });
 }
+async function laserPixels(page, early = false) {
+  return page.locator('canvas.laser-overlay').evaluate((canvas, early) => {
+    const ratio = canvas.width / canvas.getBoundingClientRect().width;
+    const pixels = early
+      ? canvas.getContext('2d').getImageData(450 * ratio, 535 * ratio, 90 * ratio, 70 * ratio).data
+      : canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data;
+    let red = 0;
+    for (let i = 0; i < pixels.length; i += 4)
+      if (pixels[i] > 180 && pixels[i + 1] < 100 && pixels[i + 2] < 100 && pixels[i + 3] > 100)
+        red++;
+    return red;
+  }, early);
+}
 async function laser(sender, receiver) {
   await sender.keyboard.press('k');
   const box = await sender.getByTestId('drawing-surface').boundingBox();
-  const trails = receiver.locator('.SVGLayer path[fill="red"][d]:not([d=""])');
   await sender.mouse.move(box.x + 450, box.y + 550);
   await sender.mouse.down();
   try {
-    await sender.mouse.move(box.x + 650, box.y + 600, { steps: 24 });
-    await expect(trails).toHaveCount(1);
-    await expect(trails).toBeVisible();
-    const bounds = await trails.boundingBox();
-    expect(bounds.width).toBeGreaterThan(1);
-    expect(bounds.height).toBeGreaterThan(1);
+    for (let i = 1; i <= 30; i++) {
+      await sender.mouse.move(box.x + 450 + i * 8, box.y + 550 + i * 2);
+      await sender.waitForTimeout(100);
+    }
+    expect(await laserPixels(sender, true)).toBeGreaterThan(20);
+    expect(await laserPixels(receiver, true)).toBeGreaterThan(20);
     await receiver.screenshot({ path: `${output}/remote-laser.png` });
   } finally {
     await sender.mouse.up();
   }
-  await expect(trails).toHaveCount(0);
+  await expect.poll(() => laserPixels(sender)).toBe(0);
+  await expect.poll(() => laserPixels(receiver)).toBe(0);
   await sender.getByRole('button', { name: 'Draw — карандаш (P)', exact: true }).click();
 }
 try {
@@ -138,7 +151,9 @@ try {
   );
   await laser(a, b);
   await laser(b, a);
-  console.log('PASS: remote laser trails appear in both directions and fade after release');
+  console.log(
+    'PASS: laser drawings stay visible in both clients during long strokes and fade after inactivity',
+  );
   await guest.setOffline(true);
   await expect(b.getByRole('status')).toContainText('Нет связи');
   await draw(b, 600, 260, '#1971c2');

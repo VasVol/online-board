@@ -43,6 +43,7 @@ async function client(page) {
     { WebSocketPolyfill: WebSocket, disableBc: true, params: { key } },
   );
   providers.push(provider);
+  provider.messageHandlers[5] = () => {}; // Board control snapshots are independent of scene sync.
   provider.messageHandlers[4] = () => {}; // Our durable-write barrier is read below.
   await until(() => provider.synced);
   return provider;
@@ -75,7 +76,7 @@ try {
   const health = await (await request('/api/health')).json();
   assert.equal(health.ok, true);
   assert.equal(health.revision, revision);
-  assert.equal(health.schema, 1);
+  assert.equal(health.schema, 2);
   const html = await (await request('/')).text();
   const assets = [...html.matchAll(/(?:src|href)="(\/assets\/[^"?]+\.(?:js|css))"/g)].map(
     (m) => m[1],

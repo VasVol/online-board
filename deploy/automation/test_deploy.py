@@ -185,5 +185,21 @@ class PublishTest(unittest.TestCase):
             self.assertFalse((root / ('.incoming-' + SHA)).exists())
 
 
+class HealthSchemaTest(unittest.TestCase):
+    def test_health_accepts_supported_schemas_but_not_unknown_or_wrong_revision(self):
+        import io
+        for schema, revision, ok, accepted in [(1, SHA, True, True), (2, SHA, True, True),
+                                               (3, SHA, True, False), (2, OLD, True, False),
+                                               (2, SHA, False, False)]:
+            with self.subTest(schema=schema, revision=revision, ok=ok):
+                payload = json.dumps({'ok': ok, 'revision': revision, 'schema': schema}).encode()
+                with patch.object(m.urllib.request, 'urlopen', return_value=io.BytesIO(payload)):
+                    if accepted:
+                        m.health('http://test.invalid', SHA, wait=0)
+                    else:
+                        with self.assertRaises(RuntimeError):
+                            m.health('http://test.invalid', SHA, wait=0)
+
+
 if __name__ == '__main__':
     unittest.main()
