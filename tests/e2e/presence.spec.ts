@@ -1,3 +1,4 @@
+import { followFirstParticipant } from './collaborators';
 import { test, expect, type Page } from '@playwright/test';
 import type { AppState } from '@excalidraw/excalidraw/types';
 
@@ -60,7 +61,7 @@ test('following matches zoom and center across independent browsers', async ({ p
   await page.getByRole('button', { name: 'Поделиться', exact: true }).click();
   const url = await page.getByLabel('Ссылка для редактирования').inputValue();
   await page.getByRole('button', { name: 'Закрыть', exact: true }).click();
-  const context = await browser.newContext({ viewport: { width: 1200, height: 850 } });
+  const context = await browser.newContext({ viewport: { width: 1000, height: 850 } });
   await context.addInitScript(() => {
     if (location.origin !== 'null') localStorage.setItem('pole-name', 'Зритель');
   });
@@ -68,8 +69,9 @@ test('following matches zoom and center across independent browsers', async ({ p
   try {
     await guest.goto(url);
     await ready(guest);
+    await expect(guest.locator('.UserList__more')).toBeVisible();
     await setCamera(page, 210, -180, 1.7);
-    await guest.locator('.UserList .Avatar').first().click();
+    await followFirstParticipant(guest);
     await expect(guest.locator('.follow-mode')).toContainText('Ведущий');
     await sameCamera(page, guest);
     // Leader pans with the real Hand tool, then changes zoom independently.
@@ -94,7 +96,7 @@ test('following matches zoom and center across independent browsers', async ({ p
     await setCamera(page, 900, 400, 2);
     await guest.waitForTimeout(250);
     expect(await camera(guest)).toEqual(stopped);
-    await guest.locator('.UserList .Avatar').first().click();
+    await followFirstParticipant(guest);
     await sameCamera(page, guest);
 
     // An offline follower stops following and can follow again after reconnect.
@@ -103,23 +105,26 @@ test('following matches zoom and center across independent browsers', async ({ p
     await expect(guest.locator('.follow-mode')).toHaveCount(0);
     await context.setOffline(false);
     await ready(guest);
-    await guest.locator('.UserList .Avatar').first().click();
+    await expect(guest.locator('.UserList .Avatar, .UserList__more').first()).toBeVisible({
+      timeout: 3000,
+    });
+    await followFirstParticipant(guest);
     await sameCamera(page, guest);
     // A leader leaving the page also stops the viewer's following.
     await page.goto('/');
     await expect(guest.locator('.follow-mode')).toHaveCount(0);
     await page.goto(url);
     await ready(page);
-    await guest.locator('.UserList .Avatar').first().click();
+    await followFirstParticipant(guest);
     await sameCamera(page, guest);
     await guest.reload();
     await ready(guest);
     await expect(guest.locator('.follow-mode')).toHaveCount(0);
-    await guest.locator('.UserList .Avatar').first().click();
+    await followFirstParticipant(guest);
     await sameCamera(page, guest);
 
     // Attempting to follow one's own follower must not create a camera loop.
-    await page.locator('.UserList .Avatar').first().click();
+    await followFirstParticipant(page);
     await expect
       .poll(async () => {
         const a = await page.evaluate(() => window.__board.api.getAppState().userToFollow);

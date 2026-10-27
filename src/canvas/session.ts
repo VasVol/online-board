@@ -52,7 +52,16 @@ export class PageSession {
     this.provider.on('status', ({ status }: { status: string }) => {
       if (this.state === 'denied') return;
       if (status === 'disconnected') this.status('offline');
-      else if (status === 'connected') this.status('saving');
+      else if (status === 'connected') {
+        // The provider removes remote states on disconnect but retains their clocks.
+        // Forget those tombstones before the new server snapshot arrives, otherwise
+        // unchanged participants stay invisible until their next heartbeat (15 s).
+        const awareness = this.provider.awareness;
+        for (const id of awareness.meta.keys())
+          if (id !== awareness.clientID && !awareness.getStates().has(id))
+            awareness.meta.delete(id);
+        this.status('saving');
+      }
     });
     this.provider.on('connection-close', (event: CloseEvent | null) => {
       if (event && event.code >= 4400 && event.code < 4500) this.status('denied');

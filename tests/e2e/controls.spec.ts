@@ -1,3 +1,4 @@
+import { followFirstParticipant } from './collaborators';
 import { test, expect, type Page } from '@playwright/test';
 import type { AppState } from '@excalidraw/excalidraw/types';
 async function ready(page: Page) {
@@ -189,7 +190,7 @@ test('owner gathers participants across pages once without permanent following',
     await other.goto(targetUrl + new URL(url).hash);
     await ready(other);
     await setCamera(page, -1800, 930, 1.6);
-    await other.locator('.UserList .Avatar').first().click();
+    await followFirstParticipant(other);
     await sameCamera(page, other);
     await page.getByRole('button', { name: 'Собрать всех', exact: true }).click();
     await expect
