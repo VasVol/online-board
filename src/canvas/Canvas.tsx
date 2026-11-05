@@ -38,6 +38,7 @@ import { PageSession, type ConnectionState } from './session';
 import { SceneBinding, readElements } from './scene';
 import { FileBridge } from './files';
 import { insertImage } from './insert-image';
+import { installImagePaste } from './clipboard-images';
 import { ImageLibrary } from './ImageLibrary';
 import { installDrawingTools, type Preview } from './drawing-tools';
 import { readViewport, applyViewport } from './viewport';
@@ -134,15 +135,34 @@ export default function Canvas(props: Props) {
         void files.current?.load();
       });
     };
+    let preparing = false;
+    let uploading = false;
+    const imageStatus = () => {
+      imagePending.current = preparing || uploading;
+      handlers.current.onStatus(
+        connectionRef.current === 'saved' && imagePending.current
+          ? 'saving'
+          : connectionRef.current,
+      );
+    };
     files.current = new FileBridge(
       props.boardId,
       api,
       (text) => handlers.current.onError(text),
       (pending) => {
-        imagePending.current = pending;
-        handlers.current.onStatus(
-          connectionRef.current === 'saved' && pending ? 'saving' : connectionRef.current,
-        );
+        uploading = pending;
+        imageStatus();
+      },
+    );
+    const bridge = files.current;
+    const removeImagePaste = installImagePaste(
+      root.current,
+      api,
+      (file) => bridge.accept({ [file.id]: file }),
+      (message) => handlers.current.onError(message),
+      (pending) => {
+        preparing = pending;
+        imageStatus();
       },
     );
     binding.current = new SceneBinding(session.doc, apply);
@@ -242,7 +262,7 @@ export default function Canvas(props: Props) {
     window.addEventListener('pointercancel', pointerUp);
     const beforeUnload = (e: BeforeUnloadEvent) => {
       flush();
-      if (files.current?.hasPending || connectionRef.current !== 'saved') {
+      if (imagePending.current || files.current?.hasPending || connectionRef.current !== 'saved') {
         e.preventDefault();
         e.returnValue = '';
       }
@@ -254,6 +274,8 @@ export default function Canvas(props: Props) {
       flush();
       cancelAnimationFrame(raf);
       removeTools();
+      removeImagePaste();
+      imagePending.current = false;
       removeFollowing();
       laser.current?.destroy();
       laser.current = null;

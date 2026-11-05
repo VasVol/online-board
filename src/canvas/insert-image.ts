@@ -5,13 +5,21 @@ import {
 } from '@excalidraw/excalidraw';
 import type { BinaryFileData, ExcalidrawImperativeAPI } from '@excalidraw/excalidraw/types';
 
-// Shared by uploads and the built-in library: both use the normal server file queue.
+// Uploads, clipboard and built-in library all use the normal server file queue.
 export async function insertImage(
   file: File,
   api: ExcalidrawImperativeAPI,
   accept: (file: BinaryFileData) => void,
   signal?: AbortSignal,
+  position?: { x: number; y: number },
 ) {
+  const state = api.getAppState();
+  const point =
+    position ||
+    viewportCoordsToSceneCoords(
+      { clientX: state.offsetLeft + state.width / 2, clientY: state.offsetTop + state.height / 2 },
+      state,
+    );
   if (
     !['image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(file.type) ||
     file.size > 2 * 1024 * 1024
@@ -36,18 +44,9 @@ export async function insertImage(
     mimeType: file.type as BinaryFileData['mimeType'],
     created: Date.now(),
   };
-  const state = api.getAppState();
-  const point = viewportCoordsToSceneCoords(
-    {
-      clientX: state.offsetLeft + state.width / 2,
-      clientY: state.offsetTop + state.height / 2,
-    },
-    state,
-  );
   const scale = Math.min(1, 600 / image.naturalWidth, 500 / image.naturalHeight);
   const width = image.naturalWidth * scale;
   const height = image.naturalHeight * scale;
-  api.addFiles([binary]);
   accept(binary);
   const elements = convertToExcalidrawElements([
     {
@@ -66,5 +65,8 @@ export async function insertImage(
     appState: { selectedElementIds: { [elements[0].id]: true } },
     captureUpdate: CaptureUpdateAction.IMMEDIATELY,
   });
+  // addFiles builds the SDK image cache from the current scene. The element
+  // must already exist, otherwise the inserting client can keep a placeholder.
+  api.addFiles([binary]);
   api.setActiveTool({ type: 'selection' });
 }
