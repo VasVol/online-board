@@ -59,7 +59,12 @@ async function ready(page) {
   await expect(page.getByRole('status')).toHaveText('Сохранено', { timeout: 90000 });
 }
 async function draw(page, x, y, color) {
-  await page.getByLabel('Цвет пера', { exact: true }).fill(color);
+  await page
+    .getByRole('button', {
+      name: color === '#e03131' ? 'Цвет: Красный' : 'Цвет: Синий',
+      exact: true,
+    })
+    .click();
   await page.getByRole('button', { name: 'Draw — карандаш (P)', exact: true }).click();
   const box = await page.getByTestId('drawing-surface').boundingBox();
   await page.mouse.move(box.x + x, box.y + y);

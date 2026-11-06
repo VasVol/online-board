@@ -1,10 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Plus,
-  ArrowUpRight,
   Search,
   Layers3,
-  BookOpen,
   MoreHorizontal,
   Pencil,
   Trash2,
@@ -15,59 +13,6 @@ import {
 import type { Board, PageList } from '../shared/types';
 import { request, json, download } from './api';
 import { Logo, Dialog, NameDialog, Pager, message } from './components/ui';
-function Sketch({ variant = 0 }: { variant?: number }) {
-  return (
-    <svg viewBox="0 0 340 160" className={`board-sketch sketch-${variant % 3}`} aria-hidden="true">
-      <defs>
-        <pattern id={`dots-${variant}`} width="16" height="16" patternUnits="userSpaceOnUse">
-          <circle cx="2" cy="2" r=".8" fill="currentColor" opacity=".13" />
-        </pattern>
-      </defs>
-      <rect width="340" height="160" fill={`url(#dots-${variant})`} />
-      {variant % 3 === 0 ? (
-        <>
-          <path
-            d="M75 118H265M110 135V30M90 50Q170 192 247 38"
-            stroke="currentColor"
-            strokeWidth="2"
-            fill="none"
-          />
-          <text x="230" y="115">
-            x
-          </text>
-          <text x="125" y="40">
-            y
-          </text>
-          <circle cx="170" cy="116" r="4" fill="currentColor" />
-        </>
-      ) : variant % 3 === 1 ? (
-        <>
-          <path d="M95 121L172 30L245 121Z" stroke="currentColor" strokeWidth="2" fill="none" />
-          <path d="M172 30V121" stroke="currentColor" strokeWidth="1" strokeDasharray="5 5" />
-          <text x="74" y="130">
-            A
-          </text>
-          <text x="165" y="22">
-            B
-          </text>
-          <text x="250" y="130">
-            C
-          </text>
-          <path d="M172 110h11v11" stroke="currentColor" fill="none" />
-        </>
-      ) : (
-        <>
-          <circle cx="172" cy="80" r="52" stroke="currentColor" strokeWidth="2" fill="none" />
-          <path d="M120 80H224M172 80L201 37" stroke="currentColor" strokeWidth="1.5" fill="none" />
-          <text x="174" y="69">
-            r
-          </text>
-          <circle cx="172" cy="80" r="3" fill="currentColor" />
-        </>
-      )}
-    </svg>
-  );
-}
 export default function Home() {
   const [boards, setBoards] = useState<PageList<Board> | null>(null),
     [query, setQuery] = useState(''),
@@ -109,25 +54,17 @@ export default function Home() {
     <div className="home">
       <header className="home-header">
         <Logo />
-        <span className="workspace-label">Личная мастерская</span>
         <div className="header-right">
           <button className="text-button" onClick={() => setHelp(true)}>
             <HelpCircle size={17} />
             Как это работает
           </button>
-          <span className="avatar" title="Ваш браузер — владелец досок">
-            В
-          </span>
         </div>
       </header>
       <main className="home-main">
-        <div className="eyebrow">
-          <span /> ПРОСТРАНСТВО ДЛЯ МАТЕМАТИКИ
-        </div>
         <div className="home-heading">
           <div>
             <h1>Мои доски</h1>
-            <p>От первой идеи до красивого решения.</p>
           </div>
           <button className="button primary" onClick={() => setEdit('new')}>
             <Plus size={19} />
@@ -162,26 +99,19 @@ export default function Home() {
           <div className="empty-state">Загружаем доски…</div>
         ) : boards?.items.length ? (
           <div className="board-grid">
-            {boards.items.map((board, i) => (
+            {boards.items.map((board) => (
               <article key={board.id} className="board-card">
-                <a
-                  className="card-preview"
-                  href={`/b/${board.id}`}
-                  aria-label={`Открыть ${board.name}`}
-                >
-                  <Sketch variant={i} />
-                  <span className="open-card">
-                    <ArrowUpRight size={21} />
-                  </span>
-                  <span className="cover-caption">{board.pageCount} стр.</span>
-                </a>
                 <div className="card-info">
                   <div>
-                    <a className="card-title" href={`/b/${board.id}`}>
+                    <a
+                      className="card-title"
+                      href={`/b/${board.id}`}
+                      aria-label={`Открыть ${board.name}`}
+                    >
                       {board.name}
                     </a>
                     <p>
-                      Создана{' '}
+                      {board.pageCount} стр. <span aria-hidden="true">·</span>{' '}
                       {new Intl.DateTimeFormat('ru', { day: 'numeric', month: 'short' }).format(
                         board.createdAt,
                       )}
@@ -222,24 +152,11 @@ export default function Home() {
                 </div>
               </article>
             ))}
-            <button className="new-card" onClick={() => setEdit('new')}>
-              <span>
-                <Plus size={24} />
-              </span>
-              Ещё одна идея?<small>Создать доску</small>
-            </button>
           </div>
         ) : (
           <div className="empty-state">
-            <div className="empty-drawing">
-              <Sketch variant={1} />
-            </div>
-            <h2>{query ? 'Ничего не нашлось' : 'Начнём с чистого листа'}</h2>
-            <p>
-              {query
-                ? 'Попробуйте другое название.'
-                : 'Создайте доску, пригласите ученика и решайте вместе.'}
-            </p>
+            <h2>{query ? 'Ничего не нашлось' : 'Пока нет досок'}</h2>
+            <p>{query ? 'Попробуйте другое название.' : 'Создайте доску для занятия.'}</p>
             {!query && (
               <button className="button primary" onClick={() => setEdit('new')}>
                 <Plus size={18} />
@@ -249,17 +166,8 @@ export default function Home() {
           </div>
         )}
         {boards && <Pager offset={offset} total={boards.total} onChange={setOffset} />}
-        <div className="home-note">
-          <BookOpen size={21} />
-          <div>
-            <strong>Одна доска — целое занятие.</strong>
-            <p>Добавляйте страницы для новых задач. Делитесь ссылкой, чтобы рисовать вместе.</p>
-          </div>
-          <span className="note-mark">x² + y²</span>
-        </div>
       </main>
       <footer className="home-footer">
-        <span>Поле · свои идеи, свой сервер</span>
         <div>
           <button
             className="text-button"
@@ -326,23 +234,17 @@ export default function Home() {
         </Dialog>
       )}
       {help && (
-        <Dialog title="Ваше пространство для занятий" onClose={() => setHelp(false)}>
+        <Dialog title="Как это работает" onClose={() => setHelp(false)}>
           <div className="help-list">
             <p>
-              <strong>1. Создайте доску.</strong> Назовите её по теме или имени ученика. Внутри
-              можно добавлять страницы.
+              <strong>Создайте доску.</strong> Добавляйте страницы для разных задач.
             </p>
             <p>
-              <strong>2. Пригласите ученика.</strong> Кнопка «Поделиться» копирует ссылку с правом
-              редактирования. Регистрация не нужна.
+              <strong>Пригласите ученика.</strong> Отправьте ему ссылку из «Поделиться».
             </p>
             <p>
-              <strong>3. Сохраните ключ владельца.</strong> Доски в каталоге привязаны к этому
-              браузеру. Ключ восстановит ваш каталог на другом устройстве. Храните его у себя.
-            </p>
-            <p className="muted">
-              Для доступа извне сервер должен быть доступен ученику: одна локальная сеть либо
-              публичный HTTPS-адрес. Настройка описана в README проекта.
+              <strong>Сохраните ключ владельца.</strong> Он вернёт доступ к вашим доскам в другом
+              браузере или на другом устройстве.
             </p>
           </div>
         </Dialog>

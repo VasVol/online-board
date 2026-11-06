@@ -21,6 +21,7 @@ async function create(page: Page) {
 }
 async function addPage(page: Page) {
   const previous = new URL(page.url()).searchParams.get('page');
+  await page.getByRole('button', { name: 'Страницы', exact: true }).click();
   await page.getByRole('button', { name: 'Новая страница', exact: true }).click();
   await page.getByLabel('Название', { exact: true }).fill('Вторая');
   await page.getByRole('button', { name: 'Сохранить', exact: true }).click();
@@ -122,6 +123,7 @@ test('persistent tools select once, draw repeatedly and ignore text fields', asy
         .map((e) => e.type),
     ),
   ).toEqual(['freedraw', 'freedraw']);
+  await page.getByRole('button', { name: 'Страницы', exact: true }).click();
   await page.getByRole('button', { name: 'Новая страница', exact: true }).click();
   await page.getByLabel('Название', { exact: true }).fill('');
   await page.keyboard.press('KeyL');
@@ -144,6 +146,8 @@ test('shared grid reaches all pages and survives reload and reconnect', async ({
     await guest.goto(url);
     await ready(guest);
     await addPage(page);
+    await page.getByRole('button', { name: 'Ещё', exact: true }).click();
+    await guest.getByRole('button', { name: 'Ещё', exact: true }).click();
     const grid = (p: Page) => p.getByRole('button', { name: 'Сетка', exact: true });
     await grid(page).click();
     await expect(grid(page)).toHaveAttribute('aria-pressed', 'true');
@@ -151,6 +155,7 @@ test('shared grid reaches all pages and survives reload and reconnect', async ({
     await expect.poll(() => gridPixels(guest)).toBeGreaterThan(100);
     await guest.reload();
     await ready(guest);
+    await guest.getByRole('button', { name: 'Ещё', exact: true }).click();
     await expect(grid(guest)).toHaveAttribute('aria-pressed', 'true');
     await grid(guest).click();
     await expect(grid(page)).toHaveAttribute('aria-pressed', 'false');

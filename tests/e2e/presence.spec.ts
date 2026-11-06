@@ -69,7 +69,8 @@ test('following matches zoom and center across independent browsers', async ({ p
   try {
     await guest.goto(url);
     await ready(guest);
-    await expect(guest.locator('.UserList__more')).toBeVisible();
+    // Without the permanent toolbar this viewport has room for the avatar itself.
+    await expect(guest.locator('.UserList .Avatar, .UserList__more').first()).toBeVisible();
     await setCamera(page, 210, -180, 1.7);
     await followFirstParticipant(guest);
     await expect(guest.locator('.follow-mode')).toContainText('Ведущий');
@@ -170,6 +171,7 @@ test('cursor labels are off by default and can be toggled without hiding partici
     }
     await expect(page.locator('.remote-cursor')).toHaveCount(2);
     await expect(page.locator('.remote-cursor-name')).toHaveCount(0);
+    await page.getByRole('button', { name: 'Ещё', exact: true }).click();
     await expect(
       page.getByRole('button', { name: 'Подписи курсоров', exact: true }),
     ).toHaveAttribute('aria-pressed', 'false');
@@ -189,6 +191,12 @@ test('cursor labels are off by default and can be toggled without hiding partici
         ),
       ),
     ).toBe(true);
+    if (
+      (await page
+        .getByRole('button', { name: 'Ещё', exact: true })
+        .getAttribute('aria-expanded')) === 'false'
+    )
+      await page.getByRole('button', { name: 'Ещё', exact: true }).click();
     await page.getByRole('button', { name: 'Подписи курсоров', exact: true }).click();
     await expect
       .poll(async () => (await page.locator('.remote-cursor-name').allTextContents()).sort())
@@ -197,6 +205,12 @@ test('cursor labels are off by default and can be toggled without hiding partici
     // This preference is local: other viewers still have no labels.
     await expect(a.locator('.remote-cursor-name')).toHaveCount(0);
     await page.screenshot({ path: 'test-results/cursor-labels-on.png' });
+    if (
+      (await page
+        .getByRole('button', { name: 'Ещё', exact: true })
+        .getAttribute('aria-expanded')) === 'false'
+    )
+      await page.getByRole('button', { name: 'Ещё', exact: true }).click();
     await page.getByRole('button', { name: 'Подписи курсоров', exact: true }).click();
     await expect(page.locator('.remote-cursor-name')).toHaveCount(0);
     await page.screenshot({ path: 'test-results/cursor-labels-off.png' });
@@ -222,6 +236,7 @@ test('cursor labels are off by default and can be toggled without hiding partici
       .toBeLessThan(0.1);
     await page.reload();
     await ready(page);
+    await page.getByRole('button', { name: 'Ещё', exact: true }).click();
     await expect(
       page.getByRole('button', { name: 'Подписи курсоров', exact: true }),
     ).toHaveAttribute('aria-pressed', 'false');

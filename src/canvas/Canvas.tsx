@@ -8,6 +8,7 @@ import {
   convertToExcalidrawElements,
   serializeAsJSON,
   exportToBlob,
+  exportToSvg,
   DEFAULT_LASER_COLOR,
 } from '@excalidraw/excalidraw';
 import type {
@@ -19,21 +20,7 @@ import type {
 } from '@excalidraw/excalidraw/types';
 import type { ExcalidrawElement } from '@excalidraw/excalidraw/element/types';
 import '@excalidraw/excalidraw/index.css';
-import {
-  Pencil,
-  Highlighter,
-  MousePointer2,
-  Hand,
-  Eraser,
-  Download,
-  Maximize,
-  Grid2X2,
-  ImagePlus,
-  Images,
-  Tags,
-  Minus,
-  Circle,
-} from 'lucide-react';
+import { DrawingDock, type DrawingTool } from './DrawingDock';
 import { PageSession, type ConnectionState } from './session';
 import { SceneBinding, readElements } from './scene';
 import { FileBridge } from './files';
@@ -47,6 +34,7 @@ import type { BoardEvent, GatherCommand, Viewport } from '../../shared/board-con
 import { circleBounds } from './geometry';
 import { LaserOverlay } from './laser-overlay';
 import { RemoteCursors } from './RemoteCursors';
+import { installSteadyZoom } from './steady-zoom';
 import { installFollowing } from './follow';
 import { download } from '../api';
 
@@ -55,6 +43,7 @@ type Props = {
   pageId: string;
   name: string;
   username: string;
+  onHelp: () => void;
   onStatus: (state: ConnectionState) => void;
   onPeople: (names: string[]) => void;
   onError: (error: string) => void;
@@ -66,7 +55,6 @@ type Props = {
   cameraTarget: GatherCommand | null;
   onCameraApplied: (id: string) => void;
 };
-type PenStyle = 'solid' | 'marker' | 'dashed' | 'dotted';
 export default function Canvas(props: Props) {
   const [api, setApi] = useState<ExcalidrawImperativeAPI | null>(null);
   const [session, setSession] = useState<PageSession | null>(null);
@@ -76,11 +64,12 @@ export default function Canvas(props: Props) {
   const connectionRef = useRef<ConnectionState>('loading');
   const imagePending = useRef(false);
   const laser = useRef<LaserOverlay | null>(null);
-  const [penStyle, setPenStyle] = useState<PenStyle>('solid');
-  const [color, setColor] = useState('#28354a');
-  const [width, setWidth] = useState(2);
+  const [color, setColor] = useState('#1e1e1e');
+  const [width, setWidth] = useState(4);
   const [cursorNames, setCursorNames] = useState(false);
   const [library, setLibrary] = useState(false);
+  const [advanced, setAdvanced] = useState(false);
+  const [penStyle, setPenStyle] = useState<'solid' | 'marker' | 'dashed' | 'dotted'>('solid');
   const root = useRef<HTMLDivElement>(null);
   const imageInput = useRef<HTMLInputElement>(null);
   const binding = useRef<SceneBinding | null>(null),
@@ -218,6 +207,7 @@ export default function Canvas(props: Props) {
     awareness.setLocalStateField('name', props.username);
     presence();
     const removeFollowing = installFollowing(api, awareness);
+    const removeSteadyZoom = installSteadyZoom(root.current);
     const removeTools = installDrawingTools(root.current, api, setPreview);
     imageEraserGuard.current = installImageEraserGuard(root.current, api);
     const pointerDown = (event: PointerEvent) => {
@@ -277,6 +267,7 @@ export default function Canvas(props: Props) {
       flush();
       cancelAnimationFrame(raf);
       removeTools();
+      removeSteadyZoom();
       imageEraserGuard.current?.destroy();
       imageEraserGuard.current = null;
       removeImagePaste();
@@ -337,17 +328,16 @@ export default function Canvas(props: Props) {
       }, 40);
     files.current?.accept(binary);
   }
-  function chooseTool(type: 'freedraw' | 'selection' | 'hand' | 'eraser' | 'straight' | 'circle') {
+  function chooseTool(type: DrawingTool) {
     if (type === 'straight' || type === 'circle')
       api?.setActiveTool({ type: 'custom', customType: type, locked: true });
     else api?.setActiveTool({ type, locked: true });
   }
-  function style(nextColor: string, nextWidth: number, nextStyle: PenStyle) {
+  function style(nextColor: string, nextWidth: number, nextStyle = penStyle) {
     setColor(nextColor);
     setWidth(nextWidth);
     setPenStyle(nextStyle);
-    const strokeStyle =
-      nextStyle === 'dashed' ? 'dashed' : nextStyle === 'dotted' ? 'dotted' : 'solid';
+    const strokeStyle = nextStyle === 'dashed' || nextStyle === 'dotted' ? nextStyle : 'solid';
     const opacity = nextStyle === 'marker' ? 35 : 100;
     const strokeWidth = nextStyle === 'marker' ? nextWidth * 5 : nextWidth;
     api?.updateScene({
@@ -399,6 +389,19 @@ export default function Canvas(props: Props) {
       handlers.current.onError('Не удалось экспортировать PNG');
     }
   }
+  async function saveSvg() {
+    if (!api) return;
+    try {
+      const svg = await exportToSvg({
+        elements: api.getSceneElements(),
+        files: api.getFiles(),
+        appState: { ...api.getAppState(), exportWithDarkMode: false },
+      });
+      download(`${props.name}.svg`, new Blob([svg.outerHTML], { type: 'image/svg+xml' }));
+    } catch {
+      handlers.current.onError('Не удалось экспортировать SVG');
+    }
+  }
   function saveJson() {
     if (api)
       download(
@@ -409,129 +412,45 @@ export default function Canvas(props: Props) {
   const bounds = preview?.type === 'ellipse' ? circleBounds(preview.start, preview.end) : null;
   return (
     <div className="canvas-layout">
-      <aside className="drawing-controls" aria-label="Инструменты рисования">
-        <div className="tool-group">
-          {(
-            [
-              { type: 'selection', label: 'Select — выделение (V)', icon: MousePointer2 },
-              { type: 'hand', label: 'Hand — перемещение (H)', icon: Hand },
-              { type: 'freedraw', label: 'Draw — карандаш (P)', icon: Pencil },
-              { type: 'straight', label: 'Прямая (L)', icon: Minus },
-              { type: 'circle', label: 'Окружность (C)', icon: Circle },
-              { type: 'eraser', label: 'Eraser — ластик (E)', icon: Eraser },
-            ] as const
-          ).map(({ type, label, icon: Icon }) => (
-            <button
-              key={type}
-              title={label}
-              aria-label={label}
-              aria-pressed={tool === type}
-              className={tool === type ? 'selected' : ''}
-              onClick={() => chooseTool(type)}
-            >
-              <Icon size={19} />
-            </button>
-          ))}
-        </div>
-        <span className="tool-divider" />
-        <label className="color-control" title="Цвет пера">
-          <input
-            type="color"
-            aria-label="Цвет пера"
-            value={color}
-            onChange={(e) => style(e.target.value, width, penStyle)}
-          />
-        </label>
-        <label className="select-control">
-          <span>Толщина</span>
-          <select
-            aria-label="Толщина пера"
-            value={width}
-            onChange={(e) => style(color, Number(e.target.value), penStyle)}
-          >
-            {[1, 2, 4, 6, 10].map((n) => (
-              <option key={n} value={n}>
-                {n} px
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="select-control">
-          <span>Стиль</span>
-          <select
-            aria-label="Стиль пера"
-            value={penStyle}
-            onChange={(e) => style(color, width, e.target.value as PenStyle)}
-          >
-            <option value="solid">Перо</option>
-            <option value="marker">Маркер</option>
-            <option value="dashed">Пунктир</option>
-            <option value="dotted">Точки</option>
-          </select>
-        </label>
-        <span className="tool-divider" />
-        <button
-          aria-label="Добавить изображение"
-          title="Добавить изображение"
-          onClick={() => imageInput.current?.click()}
-        >
-          <ImagePlus size={18} />
-        </button>
-        <input
-          type="file"
-          data-testid="image-upload"
-          ref={imageInput}
-          hidden
-          accept="image/png,image/jpeg,image/webp,image/gif"
-          onChange={(e) => void uploadImage(e.target.files?.[0])}
-        />
-        <button
-          className="image-library-toggle"
-          aria-label="Библиотека картинок"
-          title="Библиотека картинок"
-          disabled={!api || !session || connection === 'denied'}
-          onClick={() => setLibrary(true)}
-        >
-          <Images size={18} />
-          Картинки
-        </button>
-        <button
-          aria-label="Сетка"
-          title="Сетка"
-          aria-pressed={props.grid}
-          onClick={props.onToggleGrid}
-          disabled={
-            props.gridBusy ||
-            connection === 'offline' ||
-            connection === 'loading' ||
-            connection === 'denied'
-          }
-          className={props.grid ? 'selected' : ''}
-        >
-          <Grid2X2 size={18} />
-        </button>
-        <button
-          aria-label="Показать всё"
-          title="Показать всё"
-          onClick={() => api?.scrollToContent(undefined, { fitToContent: true })}
-        >
-          <Maximize size={18} />
-        </button>
-        <button
-          aria-label="Подписи курсоров"
-          title="Подписи курсоров"
-          aria-pressed={cursorNames}
-          className={cursorNames ? 'selected' : ''}
-          onClick={() => setCursorNames(!cursorNames)}
-        >
-          <Tags size={18} />
-        </button>
-        <div className="key-hints">
-          <kbd>L</kbd> прямая <kbd>C</kbd> окружность <span>· нажмите для выбора</span>
-        </div>
-      </aside>
+      <DrawingDock
+        onHelp={props.onHelp}
+        advanced={advanced}
+        onAdvanced={() => setAdvanced(!advanced)}
+        penStyle={penStyle}
+        onStyle={(next) => style(color, width, next)}
+        grid={props.grid}
+        onGrid={props.onToggleGrid}
+        gridDisabled={props.gridBusy || connection !== 'saved'}
+        tool={tool}
+        color={color}
+        width={width}
+        cursorNames={cursorNames}
+        disabled={!api || !session || connection === 'denied'}
+        onTool={chooseTool}
+        onColor={(next) => style(next, width)}
+        onWidth={(next) => style(color, next)}
+        onLibrary={() => setLibrary(true)}
+        onFit={() => api?.scrollToContent(undefined, { fitToContent: true })}
+        onCursorNames={() => setCursorNames(!cursorNames)}
+        onPng={() => void savePng()}
+        onSvg={() => void saveSvg()}
+        onJson={saveJson}
+        onUpload={() => imageInput.current?.click()}
+      />
+      <input
+        type="file"
+        data-testid="image-upload"
+        ref={imageInput}
+        hidden
+        accept="image/png,image/jpeg,image/webp,image/gif"
+        onChange={(event) => void uploadImage(event.target.files?.[0])}
+      />
       {library && <ImageLibrary onInsert={addImage} onClose={() => setLibrary(false)} />}
-      <div className="canvas" ref={root} data-testid="drawing-surface">
+      <div
+        className={`canvas ${advanced ? 'advanced-tools' : ''}`}
+        ref={root}
+        data-testid="drawing-surface"
+      >
         {session ? (
           <Excalidraw
             excalidrawAPI={setApi}
@@ -544,8 +463,9 @@ export default function Canvas(props: Props) {
                   lastActiveTool: null,
                   customType: null,
                 },
-                currentItemStrokeColor: '#28354a',
-                currentItemStrokeWidth: 2,
+                currentItemStrokeColor: '#1e1e1e',
+                currentItemStrokeWidth: 4,
+                zoom: { value: 1 as AppState['zoom']['value'] },
                 currentItemRoughness: 0,
                 currentItemRoundness: 'sharp',
                 viewBackgroundColor: '#ffffff',
@@ -569,12 +489,8 @@ export default function Canvas(props: Props) {
             }}
           >
             <MainMenu>
-              <MainMenu.Item icon={<Download size={16} />} onSelect={saveJson}>
-                Скачать .excalidraw
-              </MainMenu.Item>
-              <MainMenu.Item icon={<Download size={16} />} onSelect={() => void savePng()}>
-                Скачать PNG
-              </MainMenu.Item>
+              <MainMenu.Item onSelect={saveJson}>Скачать .excalidraw</MainMenu.Item>
+              <MainMenu.Item onSelect={() => void savePng()}>Скачать PNG</MainMenu.Item>
               <MainMenu.DefaultItems.SaveAsImage />
               <MainMenu.Separator />
               <MainMenu.DefaultItems.ToggleTheme />

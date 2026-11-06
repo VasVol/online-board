@@ -272,6 +272,7 @@ test('clipboard images: alpha and fine ink are lossless, internal copying and JP
   expect((await file(page))?.mimeType).toBe('image/png');
   const source = await photo(page);
   const choosing = page.waitForEvent('filechooser');
+  await page.getByRole('button', { name: 'Ещё', exact: true }).click();
   await page.getByRole('button', { name: 'Добавить изображение', exact: true }).click();
   await (
     await choosing
@@ -318,6 +319,7 @@ test('clipboard images: pending conversion is visible and cancelled on page chan
   await expect.poll(() => page.evaluate(() => 'finishImage' in window)).toBe(true);
   await expect(page.getByRole('status')).toHaveText('Сохраняем…');
   expect(await count(page)).toBe(0);
+  await page.getByRole('button', { name: 'Страницы', exact: true }).click();
   await page.getByRole('button', { name: 'Новая страница', exact: true }).click();
   const name = page.getByLabel('Название', { exact: true });
   await name.fill('');
@@ -331,6 +333,7 @@ test('clipboard images: pending conversion is visible and cancelled on page chan
     (window as unknown as { finishImage: () => Promise<void> }).finishImage(),
   );
   expect(await count(page)).toBe(0);
+  await page.getByRole('button', { name: 'Страницы', exact: true }).click();
   await page
     .getByRole('navigation', { name: 'Страницы доски' })
     .getByRole('button', { name: '1 Страница 1' })

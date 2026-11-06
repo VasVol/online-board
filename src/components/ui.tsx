@@ -22,10 +22,12 @@ export function Dialog({
   title,
   children,
   onClose,
+  className = '',
 }: {
   title: string;
   children: ReactNode;
   onClose: () => void;
+  className?: string;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   useEffect(() => {
@@ -35,8 +37,12 @@ export function Dialog({
   return (
     <dialog
       ref={ref}
-      className="dialog"
-      onCancel={onClose}
+      className={`dialog ${className}`}
+      aria-label={title}
+      onCancel={(event) => {
+        event.preventDefault();
+        onClose();
+      }}
       onKeyDown={(e) => e.stopPropagation()}
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();

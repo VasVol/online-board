@@ -761,14 +761,6 @@ p {
   border-color: #bdcdb0;
   background: #f4f8ed;
 }
-.current-dot {
-  height: 5px;
-  width: 5px;
-  border-radius: 50%;
-  background: #7c9c62;
-  margin-left: auto;
-  flex-shrink: 0;
-}
 .page-item:hover {
   background: #eef3e7;
 }
@@ -1018,29 +1010,6 @@ kbd {
   min-height: 200px;
   color: #94a18c;
   font-size: 13px;
-}
-.share-explainer {
-  display: flex;
-  gap: 15px;
-  margin: 0 0 24px;
-}
-.share-explainer > span {
-  width: 48px;
-  height: 48px;
-  border-radius: 11px;
-  background: #eef4e7;
-  display: grid;
-  place-items: center;
-  flex-shrink: 0;
-  color: #729b5c;
-}
-.share-explainer strong {
-  font-size: 14px;
-  font-weight: 550;
-}
-.share-explainer p {
-  font-size: 12px;
-  margin: 6px 0 0;
 }
 .copy-field {
   display: flex;

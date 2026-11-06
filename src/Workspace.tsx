@@ -1,24 +1,11 @@
 import { lazy, Suspense, useState, useEffect, useCallback, useRef } from 'react';
-import {
-  Plus,
-  ArrowLeft,
-  Search,
-  Layers3,
-  Pencil,
-  Trash2,
-  Link2,
-  X,
-  Check,
-  HelpCircle,
-  Users,
-  Copy,
-  LockKeyhole,
-} from 'lucide-react';
+import { ArrowLeft, Pencil, Link2, X, Check, Users, Copy, LockKeyhole } from 'lucide-react';
 import type { Page, PageList, BoardDetails } from '../shared/types';
 import type { ConnectionState } from './canvas/session';
 import { request, json, boardKey } from './api';
 import { useBoardControls } from './useBoardControls';
-import { Logo, Dialog, NameDialog, Pager, message } from './components/ui';
+import { Dialog, NameDialog, message } from './components/ui';
+import { PagePicker } from './components/PagePicker';
 const Canvas = lazy(() => import('./canvas/Canvas'));
 export default function Workspace({ id }: { id: string }) {
   const [details, setDetails] = useState<BoardDetails | null>(null),
@@ -33,11 +20,13 @@ export default function Workspace({ id }: { id: string }) {
     [share, setShare] = useState(''),
     [copied, setCopied] = useState(false),
     [help, setHelp] = useState(false),
-    [deleting, setDeleting] = useState(false),
     [rotating, setRotating] = useState(false);
+  const [renamingPage, setRenamingPage] = useState<Page | null>(null);
+  const [deleting, setDeleting] = useState<Page | null>(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [deleteError, setDeleteError] = useState('');
   const [username, setUsername] = useState(() => localStorage.getItem('pole-name') || 'Участник');
-  const [nameEdit, setNameEdit] = useState(false),
-    [sidebar, setSidebar] = useState(true);
+  const [nameEdit, setNameEdit] = useState(false);
   const currentRef = useRef(current);
   currentRef.current = current;
   const selectPage = useCallback((page: Page) => {
@@ -51,27 +40,30 @@ export default function Workspace({ id }: { id: string }) {
     history.replaceState(null, '', url);
   }, []);
   const controls = useBoardControls(id, selectPage, setError);
-  const load = useCallback(async () => {
-    const [board, list] = await Promise.all([
-      request<BoardDetails>(`/boards/${id}`),
-      request<PageList<Page>>(
-        `/boards/${id}/pages?q=${encodeURIComponent(query)}&limit=50&offset=${offset}`,
-      ),
-    ]);
-    setDetails(board);
-    controls.acceptGrid({ enabled: board.board.gridEnabled, revision: board.board.gridRevision });
-    setPages(list);
-    if (!currentRef.current) {
-      const requested = new URL(location.href).searchParams.get('page');
-      const first = requested
-        ? await request<Page>(`/boards/${id}/pages/${requested}`).catch(() => list.items[0])
-        : list.items[0];
-      if (first) selectPage(first);
-    } else {
-      const page = list.items.find((p) => p.id === currentRef.current?.id);
-      if (page) setCurrent(page);
-    }
-  }, [id, query, offset, selectPage, controls.acceptGrid]);
+  const load = useCallback(
+    async (search = query, start = offset) => {
+      const [board, list] = await Promise.all([
+        request<BoardDetails>(`/boards/${id}`),
+        request<PageList<Page>>(
+          `/boards/${id}/pages?q=${encodeURIComponent(search)}&limit=50&offset=${start}`,
+        ),
+      ]);
+      setDetails(board);
+      controls.acceptGrid({ enabled: board.board.gridEnabled, revision: board.board.gridRevision });
+      setPages(list);
+      if (!currentRef.current) {
+        const requested = new URL(location.href).searchParams.get('page');
+        const first = requested
+          ? await request<Page>(`/boards/${id}/pages/${requested}`).catch(() => list.items[0])
+          : list.items[0];
+        if (first) selectPage(first);
+      } else {
+        const page = list.items.find((p) => p.id === currentRef.current?.id);
+        if (page) setCurrent(page);
+      }
+    },
+    [id, query, offset, selectPage, controls.acceptGrid],
+  );
   useEffect(() => {
     let active = true;
     const refresh = () => {
@@ -112,8 +104,9 @@ export default function Workspace({ id }: { id: string }) {
     if (edit === 'board') {
       await request(`/boards/${id}`, json('PATCH', { name }));
       await load();
-    } else if (edit === 'page' && current) {
-      await request(`/boards/${id}/pages/${current.id}`, json('PATCH', { name }));
+    } else if (edit === 'page' && renamingPage) {
+      await request(`/boards/${id}/pages/${renamingPage.id}`, json('PATCH', { name }));
+      setCurrent((page) => (page?.id === renamingPage.id ? { ...page, name } : page));
       await load();
     } else {
       const page = await request<Page>(`/boards/${id}/pages`, json('POST', { name }));
@@ -121,6 +114,35 @@ export default function Workspace({ id }: { id: string }) {
       setOffset(Math.floor((pages?.total || 0) / 50) * 50);
       selectPage(page);
       await load();
+    }
+  }
+  async function deletePage() {
+    if (!deleting || deleteBusy) return;
+    setDeleteBusy(true);
+    setDeleteError('');
+    try {
+      await request(`/boards/${id}/pages/${deleting.id}`, json('DELETE'));
+      setDeleting(null);
+      if (currentRef.current?.id === deleting.id) {
+        setCurrent(null);
+        currentRef.current = null;
+        const url = new URL(location.href);
+        url.searchParams.delete('page');
+        history.replaceState(null, '', url);
+        setOffset(0);
+        setQuery('');
+        await load('', 0);
+      } else {
+        const nextOffset =
+          offset && (pages?.total ?? 0) - 1 <= offset ? Math.max(0, offset - 50) : offset;
+        setOffset(nextOffset);
+        await load(query, nextOffset);
+      }
+    } catch (error) {
+      setDeleteError(message(error));
+      setError(message(error));
+    } finally {
+      setDeleteBusy(false);
     }
   }
   const states: Record<ConnectionState, string> = {
@@ -133,15 +155,41 @@ export default function Workspace({ id }: { id: string }) {
   return (
     <div className="workspace">
       <header className="workspace-header">
-        <a className="icon-button back-button" href="/" title="Мои доски" aria-label="Мои доски">
-          <ArrowLeft size={20} />
-        </a>
-        <Logo />
-        <span className="header-separator" />
-        <button className="board-name" onClick={() => setEdit('board')} title="Переименовать доску">
-          {details?.board.name || 'Доска'}
-          <Pencil size={13} />
-        </button>
+        <div className="workspace-navigation">
+          <a className="icon-button back-button" href="/" title="Мои доски" aria-label="Мои доски">
+            <ArrowLeft size={20} />
+          </a>
+          <button
+            className="board-name"
+            onClick={() => setEdit('board')}
+            title="Переименовать доску"
+          >
+            {details?.board.name || 'Доска'}
+            <Pencil size={13} />
+          </button>
+          <PagePicker
+            pages={pages}
+            current={current}
+            query={query}
+            offset={offset}
+            owner={!!details?.isOwner}
+            onQuery={(query) => {
+              setQuery(query);
+              setOffset(0);
+            }}
+            onOffset={setOffset}
+            onSelect={selectPage}
+            onNew={() => setEdit('new')}
+            onRename={(page) => {
+              setRenamingPage(page);
+              setEdit('page');
+            }}
+            onDelete={(page) => {
+              setDeleteError('');
+              setDeleting(page);
+            }}
+          />
+        </div>
         <div className="header-right">
           <div className={`save-state ${status}`} role="status">
             <span />
@@ -171,9 +219,13 @@ export default function Workspace({ id }: { id: string }) {
               <Users size={17} /> Собрать всех
             </button>
           )}
-          <button className="button primary share-button" onClick={() => void shareBoard()}>
+          <button
+            className="icon-button share-button"
+            title="Поделиться"
+            aria-label="Поделиться"
+            onClick={() => void shareBoard()}
+          >
             <Link2 size={17} />
-            Поделиться
           </button>
         </div>
       </header>
@@ -189,94 +241,8 @@ export default function Workspace({ id }: { id: string }) {
           </button>
         </div>
       )}
-      <div className={`workspace-body ${sidebar ? '' : 'sidebar-collapsed'}`}>
-        <aside className="pages-sidebar">
-          <div className="pages-title">
-            <span>
-              СТРАНИЦЫ <small>{pages?.total || 0}</small>
-            </span>
-            <button
-              className="icon-button"
-              title="Новая страница"
-              aria-label="Новая страница"
-              onClick={() => setEdit('new')}
-            >
-              <Plus size={18} />
-            </button>
-          </div>
-          <label className="page-search">
-            <Search size={14} />
-            <input
-              aria-label="Поиск страниц"
-              placeholder="Найти страницу"
-              value={query}
-              onChange={(e) => {
-                setQuery(e.target.value);
-                setOffset(0);
-              }}
-            />
-          </label>
-          <nav className="pages-list" aria-label="Страницы доски">
-            {pages?.items.map((page, i) => (
-              <button
-                key={page.id}
-                className={`page-item ${current?.id === page.id ? 'active' : ''}`}
-                onClick={() => selectPage(page)}
-                onDoubleClick={() => {
-                  selectPage(page);
-                  setEdit('page');
-                }}
-              >
-                <span className="page-number">{offset + i + 1}</span>
-                <span>{page.name}</span>
-                {current?.id === page.id && <span className="current-dot" />}
-              </button>
-            ))}
-          </nav>
-          {pages && <Pager offset={offset} total={pages.total} limit={50} onChange={setOffset} />}
-          <button className="add-page" onClick={() => setEdit('new')}>
-            <Plus size={16} />
-            Добавить страницу
-          </button>
-          <div className="sidebar-bottom">
-            <span className="mini-brand">Решайте вместе.</span>
-            <p>Места хватит для всех идей.</p>
-            <button className="text-button" onClick={() => setHelp(true)}>
-              <HelpCircle size={15} />
-              Инструменты и клавиши
-            </button>
-          </div>
-        </aside>
+      <div className="workspace-body">
         <section className="editor-area">
-          <div className="page-heading">
-            <button
-              className="icon-button"
-              aria-label="Показать или скрыть страницы"
-              title="Страницы"
-              onClick={() => setSidebar(!sidebar)}
-            >
-              <Layers3 size={17} />
-            </button>
-            <span className="breadcrumb">
-              {details?.board.name}
-              <span>/</span>
-            </span>
-            <button className="current-page-name" onClick={() => setEdit('page')}>
-              {current?.name || 'Загрузка…'}
-              <Pencil size={12} />
-            </button>
-            <span className="page-heading-spacer" />
-            {details?.isOwner && (
-              <button
-                className="icon-button"
-                aria-label="Удалить страницу"
-                title="Удалить страницу"
-                onClick={() => setDeleting(true)}
-              >
-                <Trash2 size={16} />
-              </button>
-            )}
-          </div>
           {current ? (
             <Suspense fallback={<div className="canvas-loading">Загружаем инструменты…</div>}>
               <Canvas
@@ -285,6 +251,7 @@ export default function Workspace({ id }: { id: string }) {
                 pageId={current.id}
                 name={current.name}
                 username={username}
+                onHelp={() => setHelp(true)}
                 onStatus={setStatus}
                 onPeople={setPeople}
                 onError={setError}
@@ -317,7 +284,7 @@ export default function Workspace({ id }: { id: string }) {
             edit === 'board'
               ? details?.board.name || ''
               : edit === 'page'
-                ? current?.name || ''
+                ? renamingPage?.name || ''
                 : `Страница ${(pages?.total || 0) + 1}`
           }
           onClose={() => setEdit(null)}
@@ -325,19 +292,7 @@ export default function Workspace({ id }: { id: string }) {
         />
       )}
       {share && (
-        <Dialog title="Рисуйте вместе" onClose={() => setShare('')}>
-          <div className="share-explainer">
-            <span>
-              <Link2 size={24} />
-            </span>
-            <div>
-              <strong>Доступ по ссылке</strong>
-              <p>
-                Любой, у кого есть ссылка, сможет рисовать и менять страницы этой доски без
-                регистрации.
-              </p>
-            </div>
-          </div>
+        <Dialog title="Поделиться" className="share-dialog" onClose={() => setShare('')}>
           <label className="field-label" htmlFor="share-link">
             Ссылка для редактирования
           </label>
@@ -347,24 +302,17 @@ export default function Workspace({ id }: { id: string }) {
               {copied ? <Check size={18} /> : <Copy size={18} />} {copied ? 'Готово' : 'Копировать'}
             </button>
           </div>
-          <p className="muted">
-            Если в ссылке localhost, она работает только на вашем ноутбуке. Для ученика откройте
-            доску через сетевой или публичный адрес сервера.
-          </p>
           {details?.isOwner && (
-            <button className="text-button danger" onClick={() => setRotating(true)}>
+            <button className="text-button share-revoke" onClick={() => setRotating(true)}>
               <LockKeyhole size={15} />
-              Отозвать старую ссылку
+              Отозвать ссылку
             </button>
           )}
         </Dialog>
       )}
       {rotating && (
         <Dialog title="Заменить ссылку доступа?" onClose={() => setRotating(false)}>
-          <p>
-            Все подключённые участники будут отключены. Старые ссылки перестанут работать.
-            Сохранённые ими ранее копии рисунков остаются у них.
-          </p>
+          <p>Все подключённые участники будут отключены. Старые ссылки перестанут работать.</p>
           <div className="dialog-actions">
             <button className="button secondary" onClick={() => setRotating(false)}>
               Отмена
@@ -389,34 +337,35 @@ export default function Workspace({ id }: { id: string }) {
         </Dialog>
       )}
       {deleting && (
-        <Dialog title="Удалить страницу?" onClose={() => setDeleting(false)}>
+        <Dialog
+          title="Удалить страницу?"
+          onClose={() => {
+            if (!deleteBusy) setDeleting(null);
+          }}
+        >
           <p>
-            Страница «{current?.name}» будет скрыта вместе со всеми рисунками. Последнюю страницу
+            Страница «{deleting.name}» будет скрыта вместе со всеми рисунками. Последнюю страницу
             удалить нельзя.
           </p>
+          {deleteError && (
+            <p className="form-error" role="alert">
+              {deleteError}
+            </p>
+          )}
           <div className="dialog-actions">
-            <button className="button secondary" onClick={() => setDeleting(false)}>
+            <button
+              className="button secondary"
+              disabled={deleteBusy}
+              onClick={() => setDeleting(null)}
+            >
               Отмена
             </button>
             <button
               className="button danger-button"
-              onClick={() =>
-                void request(`/boards/${id}/pages/${current?.id}`, json('DELETE'))
-                  .then(async () => {
-                    setDeleting(false);
-                    setCurrent(null);
-                    currentRef.current = null;
-                    const url = new URL(location.href);
-                    url.searchParams.delete('page');
-                    history.replaceState(null, '', url);
-                    setOffset(0);
-                    setQuery('');
-                    await load();
-                  })
-                  .catch((e) => setError(message(e)))
-              }
+              disabled={deleteBusy}
+              onClick={() => void deletePage()}
             >
-              Удалить страницу
+              {deleteBusy ? 'Удаляем…' : 'Удалить страницу'}
             </button>
           </div>
         </Dialog>
@@ -478,8 +427,7 @@ export default function Workspace({ id }: { id: string }) {
           </dl>
           <p className="muted">
             Поворачивайте объекты за круглую ручку выделения. Вставляйте изображения из буфера
-            (PNG/JPEG/WebP/GIF до 2 МБ). В меню редактора доступны PNG, SVG и файл .excalidraw. Для
-            обычных овалов используйте инструмент эллипса.
+            (PNG/JPEG/WebP/GIF до 2 МБ). В меню «Ещё» доступны PNG, SVG и файл .excalidraw.
           </p>
         </Dialog>
       )}

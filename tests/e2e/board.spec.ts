@@ -73,10 +73,13 @@ test('drawing, persistent L/C, styles, undo/redo, pages and reload', async ({ pa
   await expect.poll(async () => (await elements(page)).length).toBe(2);
   await page.keyboard.press('Control+Shift+z');
   await expect.poll(async () => (await elements(page)).length).toBe(3);
-  await page.getByLabel('Стиль пера', { exact: true }).selectOption('dashed');
+  await page.getByRole('button', { name: 'Ещё', exact: true }).click();
   await page.getByLabel('Толщина пера', { exact: true }).selectOption('4');
-  await page.getByLabel('Цвет пера', { exact: true }).fill('#e03131');
+  await page.getByRole('button', { name: 'Цвет: Красный', exact: true }).click();
   await page.getByRole('button', { name: 'Draw — карандаш (P)', exact: true }).click();
+  await page.getByRole('button', { name: 'Ещё', exact: true }).click();
+  await page.getByLabel('Стиль пера', { exact: true }).selectOption('dashed');
+  await page.getByRole('button', { name: 'Ещё', exact: true }).click();
   await stroke(page, 710, 560);
   await expect.poll(async () => (await elements(page)).length).toBe(4);
   await expect.poll(async () => (await elements(page))[3].type).toBe('line');
@@ -86,6 +89,7 @@ test('drawing, persistent L/C, styles, undo/redo, pages and reload', async ({ pa
     strokeColor: '#e03131',
   });
   await expect(page.getByRole('status')).toHaveText('Сохранено');
+  await page.getByRole('button', { name: 'Страницы', exact: true }).click();
   await page.getByRole('button', { name: 'Новая страница', exact: true }).click();
   await page.getByLabel('Название', { exact: true }).fill('Геометрия LC');
   await page.getByRole('button', { name: 'Сохранить', exact: true }).click();
@@ -93,6 +97,7 @@ test('drawing, persistent L/C, styles, undo/redo, pages and reload', async ({ pa
   expect(await elements(page)).toHaveLength(0);
   await stroke(page);
   await expect.poll(async () => (await elements(page)).length).toBe(1);
+  await page.getByRole('button', { name: 'Страницы', exact: true }).click();
   await page
     .getByRole('navigation', { name: 'Страницы доски' })
     .getByRole('button', { name: '1 Страница 1' })
@@ -111,7 +116,8 @@ test('pen width stays constant with mouse speed and stylus pressure, live and af
   context,
 }) => {
   await create(page, 'Ровное перо');
-  await page.getByLabel('Цвет пера', { exact: true }).fill('#e03131');
+  await page.getByRole('button', { name: 'Цвет: Красный', exact: true }).click();
+  await page.getByRole('button', { name: 'Ещё', exact: true }).click();
   await page.getByLabel('Толщина пера', { exact: true }).selectOption('4');
   await page.getByRole('button', { name: 'Draw — карандаш (P)', exact: true }).click();
   const box = (await page.getByTestId('drawing-surface').boundingBox())!;
@@ -210,7 +216,7 @@ test('pen width stays constant with mouse speed and stylus pressure, live and af
 
 test('dashed and dotted pens render visible gaps, including after reload', async ({ page }) => {
   await create(page, 'Пунктир');
-  await page.getByLabel('Цвет пера', { exact: true }).fill('#e03131');
+  await page.getByRole('button', { name: 'Цвет: Красный', exact: true }).click();
   const box = (await page.getByTestId('drawing-surface').boundingBox())!;
   async function redCoverage(y: number) {
     return page.evaluate(
@@ -240,6 +246,8 @@ test('dashed and dotted pens render visible gaps, including after reload', async
     ['dashed', 380],
     ['dotted', 480],
   ] as const) {
+    await page.getByRole('button', { name: 'Ещё', exact: true }).click();
+    await page.getByLabel('Толщина пера', { exact: true }).selectOption('2');
     await page.getByLabel('Стиль пера', { exact: true }).selectOption(style);
     await page.getByRole('button', { name: 'Draw — карандаш (P)', exact: true }).click();
     await page.mouse.move(box.x + 500, box.y + y);
@@ -524,6 +532,7 @@ test('image upload is available to a fresh guest and no CDN is required', async 
   await create(page, 'Картинка');
   const png = await page.screenshot({ clip: { x: 500, y: 350, width: 120, height: 80 } });
   const choosing = page.waitForEvent('filechooser', { timeout: 10000 });
+  await page.getByRole('button', { name: 'Ещё', exact: true }).click();
   await page.getByRole('button', { name: 'Добавить изображение', exact: true }).click();
   const chooser = await choosing;
   await chooser.setFiles({ name: 'fixture.png', mimeType: 'image/png', buffer: png });
