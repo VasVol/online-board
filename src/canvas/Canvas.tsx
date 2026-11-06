@@ -39,6 +39,7 @@ import { SceneBinding, readElements } from './scene';
 import { FileBridge } from './files';
 import { insertImage } from './insert-image';
 import { installImagePaste } from './clipboard-images';
+import { installImageEraserGuard } from './image-eraser-guard';
 import { ImageLibrary } from './ImageLibrary';
 import { installDrawingTools, type Preview } from './drawing-tools';
 import { readViewport, applyViewport } from './viewport';
@@ -91,6 +92,7 @@ export default function Canvas(props: Props) {
   const penRef = useRef(penStyle);
   penRef.current = penStyle;
   const gestureIds = useRef(new Set<string>());
+  const imageEraserGuard = useRef<ReturnType<typeof installImageEraserGuard> | null>(null);
   useEffect(() => {
     const current = new PageSession(props.boardId, props.pageId);
     current.onStatus = (state) => {
@@ -217,8 +219,9 @@ export default function Canvas(props: Props) {
     presence();
     const removeFollowing = installFollowing(api, awareness);
     const removeTools = installDrawingTools(root.current, api, setPreview);
+    imageEraserGuard.current = installImageEraserGuard(root.current, api);
     const pointerDown = (event: PointerEvent) => {
-      if (event.target instanceof HTMLCanvasElement && event.button === 0) {
+      if (event.target instanceof HTMLCanvasElement && (event.button === 0 || event.button === 5)) {
         interacting = true;
         gestureIds.current = new Set(api.getSceneElements().map((e) => e.id));
       }
@@ -274,6 +277,8 @@ export default function Canvas(props: Props) {
       flush();
       cancelAnimationFrame(raf);
       removeTools();
+      imageEraserGuard.current?.destroy();
+      imageEraserGuard.current = null;
       removeImagePaste();
       imagePending.current = false;
       removeFollowing();
@@ -324,7 +329,7 @@ export default function Canvas(props: Props) {
         : state.activeTool.type;
     setTool((previous) => (previous === nextTool ? previous : nextTool));
     if (!binding.current) return;
-    pending.current = elements;
+    pending.current = imageEraserGuard.current?.normalize(elements) ?? elements;
     if (!timer.current)
       timer.current = setTimeout(() => {
         timer.current = undefined;
